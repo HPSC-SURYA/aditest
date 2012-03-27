@@ -4,7 +4,8 @@ program trans
 	include "mpif.h"
 
 	integer myid, numproc, ierr
-	integer n, i, j, k, step, startindex, indexspan, bufflen
+	integer n, i, j, k, step, startindex, indexspan, bufflen, stage
+	integer id1, id2
 	parameter (n=8)
 
 	! probably could use allocatable arrays to reduce memory duplication
@@ -21,7 +22,7 @@ program trans
 	! slab decomposition
 	startindex = myid*n/numproc+1
 	indexspan = n/numproc
-	bufflen = n*n/numproc
+	bufflen = n*n/(numproc*numproc)
 	allocate(sendbuffer(bufflen))
 	allocate(recvbuffer(bufflen))
 
@@ -60,15 +61,18 @@ program trans
 		! START TRANSPOSE
 		
 		! linearize data to send
-	!	write(*,*), myid, 'start linearize'
-	!	j = 1
-	!	do i=startindex, indexspan
-	!		do k=1,n
-	!			sendbuffer(j+k-1) = up(i,k)
-	!		enddo
-	!		j = j + n
-	!	enddo
-	!	write(*,*), myid, 'end linearize'
+		do stage=1,numproc/2
+			! at stage n, swap with proc myid(+/-)n mod numproc
+			id1 = MOD(myid-stage+numproc,numproc)
+			id2 = MOD(myid+stage,numproc)
+			write(*,*), myid, stage, id1, id2
+			! if stage=numproc/2, id1=id2, so just do one swap
+			if (stage .eq. numproc/2) ten
+				! swap with id1
+			else
+				! swap 
+			endif
+		enddo
 
 		! END TRANSPOSE
 
@@ -92,7 +96,6 @@ program trans
 			write(*,'(10f5.1)'),up(i,0:n+1)
 		enddo
 	endif
-	write(*,*), 'end'
 	deallocate(sendbuffer)
 	deallocate(recvbuffer)
 
