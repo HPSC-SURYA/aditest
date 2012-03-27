@@ -4,16 +4,26 @@ program trans
 	include "mpif.h"
 
 	integer myid, numproc, ierr
-	integer n, i, j, k, step
+	integer n, i, j, k, step, startindex, indexspan, bufflen
 	parameter (n=8)
 
+	! probably could use allocatable arrays to reduce memory duplication
+	! oh well
 	real*8 u(0:n+1,0:n+1), up(0:n+1,0:n+1)
+	real*8, dimension(:), allocatable :: sendbuffer, recvbuffer
 	real*8 a(n), b(n), c(n), d(n), x(n)
 	real*8 dx, dt, dt2
 
+	! MPI goodness
 	call MPI_Init(ierr)
 	call MPI_Comm_rank(MPI_COMM_WORLD, myid, ierr)
 	call MPI_Comm_size(MPI_COMM_WORLD, numproc, ierr)
+	! slab decomposition
+	startindex = myid*n/numproc+1
+	indexspan = n/numproc
+	bufflen = n*n/numproc
+	allocate(sendbuffer(bufflen))
+	allocate(recvbuffer(bufflen))
 
 	! dx might actually be 1/(n+1)
 	dx = 1d0/n
@@ -30,10 +40,13 @@ program trans
 	b = 2d0*(dx*dx/dt+1d0)
 	c = -1d0
 
+	call MPI_Barrier(MPI_COMM_WORLD, ierr)
+
 	! start time-stepping
-	do step=1,100000
+	do step=1,1
 		! start in one direction
-		do i=1,n
+		do i=startindex,indexspan+startindex-1
+			write(*,*),myid,i
 			! load up d
 			do k=1,n
 				d(k) = u(i+1,k) + 2d0*(dx*dx/dt-1d0)*u(i,k) + u(i-1,k)
@@ -44,8 +57,23 @@ program trans
 			up(i,1:n) = x
 		enddo
 
+		! START TRANSPOSE
+		
+		! linearize data to send
+	!	write(*,*), myid, 'start linearize'
+	!	j = 1
+	!	do i=startindex, indexspan
+	!		do k=1,n
+	!			sendbuffer(j+k-1) = up(i,k)
+	!		enddo
+	!		j = j + n
+	!	enddo
+	!	write(*,*), myid, 'end linearize'
+
+		! END TRANSPOSE
+
 		! now do other direction
-		do j=1,n
+		do j=startindex,indexspan+startindex-1
 			do k=1,n
 				d(k) = up(k,j+1) + 2d0*(dx*dx/dt-1d0)*up(k,j) + u(k,j-1)
 			enddo
@@ -54,12 +82,19 @@ program trans
 			u(1:n,j) = x
 		enddo
 
+		! transpose back
+
 	enddo
 
 	! output to screen
-	do i=0,n+1
-		write(*,'(10f5.1)'),up(i,0:n+1)
-	enddo
+	if (myid .eq. 0) then
+		do i=0,n+1
+			write(*,'(10f5.1)'),up(i,0:n+1)
+		enddo
+	endif
+	write(*,*), 'end'
+	deallocate(sendbuffer)
+	deallocate(recvbuffer)
 
 	call MPI_Finalize(ierr)
 	
