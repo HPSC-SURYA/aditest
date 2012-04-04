@@ -58,7 +58,7 @@ program trans
 		enddo
 
 		! START TRANSPOSE		
-		call stransposeMPI(myid, numproc, n/numproc, n)
+		call stransposeMPI(myid, numproc, n/numproc, n, u, up)
 		! END TRANSPOSE
 
 		! now do other direction
@@ -89,14 +89,16 @@ end program
 
 
 ! simple (crappy) transpose
-subroutine stransposeMPI(myid, numproc, slablength, blocklength)
+subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvslab)
 	include "mpif.h"
 	integer myid, numproc, slablength, blocklength
+	real*8 sendslab(slablength, slablength), recvslab(slablength, slablength)
+	real*8 block(blocklength, blocklength)
 	integer ii, ij, ii2, ierror, stat
 	integer sendbuf, recvbuf
-	integer dt_block
+	integer dt_block, blocksize
 
-	call MPI_TYPE_VECTOR(blocklength, blocklength, slablength, MPI_DOUBLE_PRECISION, dt_block, ierror)
+	blocksize = blocklength*blocklength
 
 	sendbuf = 10 ! for testing purposes
 	recvbuf = 0
@@ -107,20 +109,19 @@ subroutine stransposeMPI(myid, numproc, slablength, blocklength)
 			do ij=0,numproc-1
 				if (ij .ne. myid) then
 		!			write(*,*), "proc ", myid, "sending to ", ij
-					call MPI_SEND(sendbuf, 1, MPI_INTEGER, ij, 0, MPI_COMM_WORLD, ierror)
+					call MPI_SEND(block, blocksize, MPI_DOUBLE_PRECISION, ij, 0, MPI_COMM_WORLD, ierror)
 		!			write(*,*), "proc ", myid, "sent to ", ij
 				endif
 			enddo
 		else
 			! recv from ii
 		!	write(*,*), "proc ", myid, "post recv from ", ii
-			call MPI_RECV(recvbuf, 1, MPI_INTEGER, ii, 0, MPI_COMM_WORLD, stat, ierror)
+			call MPI_RECV(block, blocksize, MPI_DOUBLE_PRECISION, ii, 0, MPI_COMM_WORLD, stat, ierror)
 		!	write(*,*), "proc ", myid, "recv from ", ii
 		endif
 		call MPI_BARRIER(MPI_COMM_WORLD, ierror)
 	enddo
 
-	call MPI_TYPE_FREE(dt_block, ierror)
 !	write(*,*), "proc ", myid, "transpose done"
 end subroutine stransposeMPI
 
