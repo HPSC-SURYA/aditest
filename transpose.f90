@@ -59,6 +59,7 @@ program trans
 		enddo
 
 		! START TRANSPOSE
+		sendbuffer = up(1:indexspan,1:indexspan)
 		
 		! linearize data to send
 		do stage=1,numproc/2
@@ -67,7 +68,7 @@ program trans
 			id2 = MOD(myid+stage,numproc)
 			write(*,*), myid, stage, id1, id2
 			! if stage=numproc/2, id1=id2, so just do one swap
-			if (stage .eq. numproc/2) ten
+			if (stage .eq. numproc/2) then
 				! swap with id1
 			else
 				! swap 
@@ -100,9 +101,18 @@ program trans
 	deallocate(recvbuffer)
 
 	call MPI_Finalize(ierr)
-	
 end program
 
+! called to linearize appropriate part of u into buffer
+! then swap with proc 'id'
+! then reload buffer into u
+subroutine swap_with_proc(myid, id, u, buffer, n)
+	implicit none
+	integer i
+	do i=1,n
+		buffer(:,i) = u(n*myid+1:n*(myid+1)+1,i)
+	enddo
+end subroutineswap_with_proc
 
 ! SHAMELESSLY stolen from wikipedia
 subroutine solve_tridiag(a,b,c,v,x,n)
