@@ -47,7 +47,6 @@ program trans
 	do step=1,1
 		! start in one direction
 		do i=startindex,indexspan+startindex-1
-			write(*,*),myid,i
 			! load up d
 			do k=1,n
 				d(k) = u(i+1,k) + 2d0*(dx*dx/dt-1d0)*u(i,k) + u(i-1,k)
@@ -58,23 +57,8 @@ program trans
 			up(i,1:n) = x
 		enddo
 
-		! START TRANSPOSE
-		sendbuffer = up(1:indexspan,1:indexspan)
-		
-		! linearize data to send
-		do stage=1,numproc/2
-			! at stage n, swap with proc myid(+/-)n mod numproc
-			id1 = MOD(myid-stage+numproc,numproc)
-			id2 = MOD(myid+stage,numproc)
-			write(*,*), myid, stage, id1, id2
-			! if stage=numproc/2, id1=id2, so just do one swap
-			if (stage .eq. numproc/2) then
-				! swap with id1
-			else
-				! swap 
-			endif
-		enddo
-
+		! START TRANSPOSE		
+		call stransposeMPI(myid, numproc)
 		! END TRANSPOSE
 
 		! now do other direction
@@ -103,16 +87,71 @@ program trans
 	call MPI_Finalize(ierr)
 end program
 
-! called to linearize appropriate part of u into buffer
-! then swap with proc 'id'
-! then reload buffer into u
-subroutine swap_with_proc(myid, id, u, buffer, n)
-	implicit none
-	integer i
-	do i=1,n
-		buffer(:,i) = u(n*myid+1:n*(myid+1)+1,i)
+
+! simple (crappy) transpose
+subroutine stransposeMPI(myid, numproc)
+	include "mpif.h"
+	integer myid, numproc
+	integer ii, ij, ierror, stat
+	integer sendbuf, recvbuf
+
+	sendbuf = 10
+	recvbuf = 0
+	do ii=0,numproc-1
+		if (ii .eq. myid) then
+			! send everything
+			do ij=0,numproc-1
+				if (ij .ne. myid) then
+					write(*,*), "proc ", myid, "sending to ", ij
+					call MPI_SEND(sendbuf, 1, MPI_INT, ij, 0, MPI_COMM_WORLD, ierror)
+				endif
+			enddo
+		else
+			! recv from ii
+			write(*,*), "proc ", myid, "recv from ", ii
+			call MPI_RECV(recvbuf, 1, MPI_INT, ii, 0, MPI_COMM_WORLD, stat, ierror)
+		endif
 	enddo
-end subroutineswap_with_proc
+end subroutine stransposeMPI
+
+
+! this is the advanced (faster) version that doesnt work at all
+subroutine transposeMPI(myid, numproc)
+	include "mpif.h" ! crashes if i dont have this again. why?
+	! params
+	integer myid, numproc
+	! local variables
+	integer ii, tradewith, ierror, stat
+	integer sendbuf, recvbuf
+
+	ii = 1
+	i2 = 2**(ii-1)
+	sendbuf = 10
+	do while (ii .le. numproc/2)
+		if (ii .eq. numproc/2) then
+			! final stage, no need for 2 sub-stages
+		else
+			! non-final stage, needs 2 sub-stages
+			if (iand(myid,i2) .eq. 0) then
+				tradewith = mod(myid+ii, numproc)
+				write(*,*), "proc ", myid, " trade up with ", tradewith, " at stage ", i2
+				call MPI_SEND(sendbuf, 1, MPI_INT, tradewith, 0, MPI_COMM_WORLD, ierror)
+				call MPI_RECV(recvbuf, 1, MPI_INT, tradewith, 0, MPI_COMM_WORLD, stat, ierror)
+			else
+				tradewith = mod(myid-ii+numproc, numproc)
+				write(*,*), "proc ", myid, " trade down with ", tradewith, " at stage ", i2
+				call MPI_RECV(recvbuf, 1, MPI_INT, tradewith, 0, MPI_COMM_WORLD, stat, ierror)
+				call MPI_SEND(sendbuf, 1, MPI_INT, tradewith, 0, MPI_COMM_WORLD, ierror)
+			endif
+		endif
+		write(*,*), "proc ", myid, " end stage ", i2
+		ii = ii+1
+		i2 = 2**(ii-1)
+		call MPI_Barrier(MPI_COMM_WORLD, ierror)
+	enddo
+	
+end subroutine transposeMPI
+
 
 ! SHAMELESSLY stolen from wikipedia
 subroutine solve_tridiag(a,b,c,v,x,n)
