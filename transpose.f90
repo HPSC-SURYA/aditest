@@ -11,7 +11,7 @@ program trans
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
 	real*8 u(0:n+1,0:n+1), up(0:n+1,0:n+1)
-	real*8, dimension(:), allocatable :: sendbuffer, recvbuffer
+	real*8, dimension(:,:), allocatable :: slab1, slab2, slab1p, slab2p
 	real*8 a(n), b(n), c(n), d(n), x(n)
 	real*8 dx, dt, dt2
 
@@ -20,21 +20,26 @@ program trans
 	call MPI_Comm_rank(MPI_COMM_WORLD, myid, ierr)
 	call MPI_Comm_size(MPI_COMM_WORLD, numproc, ierr)
 	! slab decomposition
-	startindex = myid*n/numproc+1
+	startindex = myid*n/numproc+2
 	indexspan = n/numproc
 	bufflen = n*n/(numproc*numproc)
-	allocate(sendbuffer(bufflen))
-	allocate(recvbuffer(bufflen))
+	! both slabs are columnar to speed things up? sure.
+	allocate(slab1(n+2,indexspan+2))
+	allocate(slab2(n+2,indexspan+2))
+	allocate(slab1p(n+2,indexspan+2))
+	allocate(slab2p(n+2,indexspan+2))
 
 	! dx might actually be 1/(n+1)
 	dx = 1d0/n
 	dt = 0.01d0
 
 	! initialize things to 0
-	u = 0.0
-	u(0,:) = 1d0
-	up = 0.0 ! u-prime
-	up(0,:) = 1d0
+	slab1 = 0.0
+	slab1(1,:) = 1d0
+	slab2 = 0.0
+	if (myid .eq. 0) then
+		slab2(:,1) = 1d0
+	endif
 
 	! these never change, precompute
 	a = -1d0
@@ -48,27 +53,27 @@ program trans
 		! start in one direction
 		do i=startindex,indexspan+startindex-1
 			! load up d
-			do k=1,n
-				d(k) = u(i+1,k) + 2d0*(dx*dx/dt-1d0)*u(i,k) + u(i-1,k)
+			do k=2,n+1
+				d(k) = slab1(k,i+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,i) + slab1(k,i-1)
 			enddo
 			! call tridi
 			call solve_tridiag(a,b,c,d,x,n)
 			! load result into other matrix
-			up(i,1:n) = x
+			slab1p(2:n+1,i) = x
 		enddo
 
 		! START TRANSPOSE		
-		call stransposeMPI(myid, numproc, n/numproc, n, u, up)
+		call stransposeMPI(myid, numproc, n/numproc, n, slab1p, slab2)
 		! END TRANSPOSE
 
 		! now do other direction
 		do j=startindex,indexspan+startindex-1
-			do k=1,n
-				d(k) = up(k,j+1) + 2d0*(dx*dx/dt-1d0)*up(k,j) + u(k,j-1)
+			do k=2,n+1
+				d(k) = slab2(k,j+1) + 2d0*(dx*dx/dt-1d0)*slab2(k,j) + slab2(k,j-1)
 			enddo
 			call solve_tridiag(a,b,c,d,x,n)
 			! back to original matrix
-			u(1:n,j) = x
+			slab2p(2:n+1,j) = x
 		enddo
 
 		! transpose back
@@ -81,9 +86,11 @@ program trans
 			write(*,'(10f5.1)'),up(i,0:n+1)
 		enddo
 	endif
-	deallocate(sendbuffer)
-	deallocate(recvbuffer)
 
+	deallocate(slab1)
+	deallocate(slab2)
+	deallocate(slab1p)
+	deallocate(slab2p)
 	call MPI_Finalize(ierr)
 end program
 
@@ -95,13 +102,10 @@ subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvs
 	real*8 sendslab(slablength, slablength), recvslab(slablength, slablength)
 	real*8 block(blocklength, blocklength)
 	integer ii, ij, ii2, ierror, stat
-	integer sendbuf, recvbuf
-	integer dt_block, blocksize
+	integer blocksize
 
 	blocksize = blocklength*blocklength
 
-	sendbuf = 10 ! for testing purposes
-	recvbuf = 0
 	do ii2=0,numproc-1
 		ii = ii2 ! something terrible is happening
 		if (ii .eq. myid) then
