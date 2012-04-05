@@ -72,16 +72,13 @@ program trans
 				d(k-1) = slab1(k,i+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,i) + slab1(k,i-1)
 			enddo
 			! call tridi
-			if (myid .eq. 0) then
-				write(*,'(8f5.1)'), d
-			endif
 			call solve_tridiag(a,b,c,d,x,n)
 			! load result into other matrix
 			slab2(2:n+1,i) = x
 		enddo
-		slab1 = slab2
+!		slab1 = slab2
 		! START TRANSPOSE		
-!		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
+		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
 		! END TRANSPOSE
 
 		! now do other direction
@@ -125,9 +122,9 @@ end program
 subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvslab)
 	include "mpif.h"
 	integer myid, numproc, slablength, blocklength, offset
-	real*8 sendslab(slablength, slablength), recvslab(slablength, slablength)
+	real*8 sendslab(slablength+2, slablength+2), recvslab(slablength+2, slablength+2)
 	real*8 block(blocklength, blocklength)
-	integer ii, ij, ii2, ierror, stat(MPI_STATUS_SIZE)
+	integer ii, ij, ii2, ik, ierror, stat(MPI_STATUS_SIZE)
 	integer blocksize
 
 	blocksize = blocklength*blocklength
@@ -140,16 +137,25 @@ subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvs
 				if (ij .ne. myid) then
 		!			write(*,*), "proc ", myid, "sending to ", ij
 					offset = ij*blocklength
-					block = sendslab(1+offset:blocklength+offset, 1:blocklength)
+					block = transpose(sendslab(2+offset:1+blocklength+offset, 2:1+blocklength))
+					write(*,*), myid, ij
+					do ik=1,blocklength
+							write(*,'(4f5.1)') block(:,ik)
+					enddo
 					call MPI_SEND(block, blocksize, MPI_REAL8, ij, 0, MPI_COMM_WORLD, ierror)
 		!			write(*,*), "proc ", myid, "sent to ", ij
+				else
+					offset = ij*blocklength
+					block = transpose(sendslab(2+offset:1+blocklength+offset, 2:1+blocklength))
+					recvslab(2+offset:1+blocklength+offset, 2:1+blocklength) = block
 				endif
 			enddo
 		else
 			! recv from ii
 		!	write(*,*), "proc ", myid, "post recv from ", ii
 			call MPI_RECV(block, blocksize, MPI_REAL8, ii, 0, MPI_COMM_WORLD, stat, ierror)
-			recvslab(1:blocklength, 1:blocklength) = block
+			offset = ii*blocklength
+			recvslab(2+offset:1+blocklength+offset, 2:1+blocklength) = block
 		!	write(*,*), "proc ", myid, "recv from ", ii
 		endif
 		call MPI_BARRIER(MPI_COMM_WORLD, ierror)
