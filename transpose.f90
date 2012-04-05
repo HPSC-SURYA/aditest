@@ -3,16 +3,18 @@ program trans
 	implicit none
 	include "mpif.h"
 
-	integer myid, numproc, ierr
-	integer n, i, j, k, step, startindex, indexspan, bufflen, stage
+	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE), dt_slab, req
+	integer n, i, j, k, step, startindex, indexspan, stage, slabsize
 	integer id1, id2
+	real*8 :: wtf
 	parameter (n=8)
 
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
-	real*8, dimension(:,:), allocatable :: slab1, slab2
+	real*8, dimension(:,:), allocatable :: slab1, slab2, slabrecv
 	real*8 a(n), b(n), c(n), d(n), x(n)
 	real*8 dx, dt, dt2
+
 
 	! MPI goodness
 	call MPI_Init(ierr)
@@ -21,22 +23,34 @@ program trans
 	! slab decomposition
 	startindex = myid*n/numproc+2
 	indexspan = n/numproc
-	bufflen = n*n/(numproc*numproc)
+	slabsize = (n+2)*(indexspan+2)
 	! both slabs are columnar to speed things up? sure.
 	allocate(slab1(n+2,indexspan+2))
 	allocate(slab2(n+2,indexspan+2))
+	allocate(slabrecv(n+2,indexspan+2))
+
+	call MPI_TYPE_CONTIGUOUS(slabsize, MPI_DOUBLE_PRECISION, dt_slab, ierr)
+	call MPI_TYPE_COMMIT(dt_slab, ierr)
 
 	! dx might actually be 1/(n+1)
 	dx = 1d0/n
 	dt = 0.01d0
+	wtf = 10.0
 
 	! initialize things to 0
 	slab1 = 0.0
 	slab1(1,:) = 1d0
-	slab2 = 0.0
+	slab1(n+2,:) = 1d0
 	if (myid .eq. 0) then
-		slab2(:,1) = 1d0
+		slab1(:,1) = 1d0
 	endif
+	if (myid .eq. numproc-1) then
+		slab1(:,indexspan+2) = 1d0
+	endif
+	slab2 = 0.0
+!	if (myid .eq. 0) then
+!		slab2(:,1) = 1d0
+!	endif
 
 	! these never change, precompute
 	a = -1d0
@@ -59,34 +73,44 @@ program trans
 			! load result into other matrix
 			slab2(2:n+1,i) = x
 		enddo
-		write(*,*), "proc ", myid, "call transpose"
+		slab1 = slab2
 		! START TRANSPOSE		
-		call stransposeMPI(myid, numproc, n/numproc, n, slab2, slab1)
+!		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
 		! END TRANSPOSE
 
 		! now do other direction
-		do j=1,indexspan
-			do k=2,n+1
-				d(k) = slab1(k,j+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,j) + slab1(k,j-1)
-			enddo
-			call solve_tridiag(a,b,c,d,x,n)
+!		do j=1,indexspan
+!			do k=2,n+1
+!				d(k) = slab1(k,j+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,j) + slab1(k,j-1)
+!			enddo
+!			call solve_tridiag(a,b,c,d,x,n)
 			! back to original matrix
-			slab2(2:n+1,j) = x
-		enddo
+!			slab2(2:n+1,j) = x
+!		enddo
 
 		! transpose back
-
 	enddo
 
 	! output to screen
 	if (myid .eq. 0) then
-		do i=1,indexspan
+		write(*,*), myid
+		do i=1,indexspan+2
 			write(*,'(10f5.1)'),slab1(1:n+2,i)
 		enddo
+		do i=1,numproc-1
+			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
+			write(*,*), i
+			do j=1,indexspan+2
+				write(*,'(10f5.1)'),slab1(1:n+2,j)
+			enddo
+		enddo
+	else
+		call MPI_SEND(slab1, 1, dt_slab, 0, 5, MPI_COMM_WORLD, ierr)
 	endif
 
 	deallocate(slab1)
 	deallocate(slab2)
+	call MPI_TYPE_FREE(dt_slab, ierr)
 	call MPI_Finalize(ierr)
 end program
 
@@ -94,10 +118,10 @@ end program
 ! simple (crappy) transpose
 subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvslab)
 	include "mpif.h"
-	integer myid, numproc, slablength, blocklength
+	integer myid, numproc, slablength, blocklength, offset
 	real*8 sendslab(slablength, slablength), recvslab(slablength, slablength)
 	real*8 block(blocklength, blocklength)
-	integer ii, ij, ii2, ierror, stat
+	integer ii, ij, ii2, ierror, stat(MPI_STATUS_SIZE)
 	integer blocksize
 
 	blocksize = blocklength*blocklength
@@ -109,14 +133,17 @@ subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvs
 			do ij=0,numproc-1
 				if (ij .ne. myid) then
 		!			write(*,*), "proc ", myid, "sending to ", ij
-					call MPI_SEND(block, blocksize, MPI_DOUBLE_PRECISION, ij, 0, MPI_COMM_WORLD, ierror)
+					offset = ij*blocklength
+					block = sendslab(1+offset:blocklength+offset, 1:blocklength)
+					call MPI_SEND(block, blocksize, MPI_REAL8, ij, 0, MPI_COMM_WORLD, ierror)
 		!			write(*,*), "proc ", myid, "sent to ", ij
 				endif
 			enddo
 		else
 			! recv from ii
 		!	write(*,*), "proc ", myid, "post recv from ", ii
-			call MPI_RECV(block, blocksize, MPI_DOUBLE_PRECISION, ii, 0, MPI_COMM_WORLD, stat, ierror)
+			call MPI_RECV(block, blocksize, MPI_REAL8, ii, 0, MPI_COMM_WORLD, stat, ierror)
+			recvslab(1:blocklength, 1:blocklength) = block
 		!	write(*,*), "proc ", myid, "recv from ", ii
 		endif
 		call MPI_BARRIER(MPI_COMM_WORLD, ierror)
