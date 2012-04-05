@@ -48,9 +48,14 @@ program trans
 		slab1(:,indexspan+2) = 1d0
 	endif
 	slab2 = 0.0
-!	if (myid .eq. 0) then
-!		slab2(:,1) = 1d0
-!	endif
+	slab2(1,:) = 1d0
+	slab2(n+2,:) = 1d0
+	if (myid .eq. 0) then
+		slab2(:,1) = 1d0
+	endif
+	if (myid .eq. numproc-1) then
+		slab2(:,indexspan+2) = 1d0
+	endif
 
 	! these never change, precompute
 	a = -1d0
@@ -62,7 +67,7 @@ program trans
 	! start time-stepping
 	do step=1,1
 		! start in one direction
-		do i=1,indexspan
+		do i=2,indexspan+1
 			!i2 = i+startindex-1
 			! load up d
 			do k=2,n+1
@@ -73,7 +78,7 @@ program trans
 			! load result into other matrix
 			slab2(2:n+1,i) = x
 		enddo
-		slab1 = slab2
+		slab1(1:n+2,1:indexspan+2) = slab2(1:n+2,1:indexspan+2)
 		! START TRANSPOSE		
 !		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
 		! END TRANSPOSE
