@@ -10,8 +10,7 @@ program trans
 
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
-	real*8 u(0:n+1,0:n+1), up(0:n+1,0:n+1)
-	real*8, dimension(:,:), allocatable :: slab1, slab2, slab1p, slab2p
+	real*8, dimension(:,:), allocatable :: slab1, slab2
 	real*8 a(n), b(n), c(n), d(n), x(n)
 	real*8 dx, dt, dt2
 
@@ -26,8 +25,6 @@ program trans
 	! both slabs are columnar to speed things up? sure.
 	allocate(slab1(n+2,indexspan+2))
 	allocate(slab2(n+2,indexspan+2))
-	allocate(slab1p(n+2,indexspan+2))
-	allocate(slab2p(n+2,indexspan+2))
 
 	! dx might actually be 1/(n+1)
 	dx = 1d0/n
@@ -51,7 +48,8 @@ program trans
 	! start time-stepping
 	do step=1,1
 		! start in one direction
-		do i=startindex,indexspan+startindex-1
+		do i=1,indexspan
+			!i2 = i+startindex-1
 			! load up d
 			do k=2,n+1
 				d(k) = slab1(k,i+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,i) + slab1(k,i-1)
@@ -59,21 +57,21 @@ program trans
 			! call tridi
 			call solve_tridiag(a,b,c,d,x,n)
 			! load result into other matrix
-			slab1p(2:n+1,i) = x
+			slab2(2:n+1,i) = x
 		enddo
-
+		write(*,*), "proc ", myid, "call transpose"
 		! START TRANSPOSE		
-		call stransposeMPI(myid, numproc, n/numproc, n, slab1p, slab2)
+		call stransposeMPI(myid, numproc, n/numproc, n, slab2, slab1)
 		! END TRANSPOSE
 
 		! now do other direction
-		do j=startindex,indexspan+startindex-1
+		do j=1,indexspan
 			do k=2,n+1
-				d(k) = slab2(k,j+1) + 2d0*(dx*dx/dt-1d0)*slab2(k,j) + slab2(k,j-1)
+				d(k) = slab1(k,j+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,j) + slab1(k,j-1)
 			enddo
 			call solve_tridiag(a,b,c,d,x,n)
 			! back to original matrix
-			slab2p(2:n+1,j) = x
+			slab2(2:n+1,j) = x
 		enddo
 
 		! transpose back
@@ -82,15 +80,13 @@ program trans
 
 	! output to screen
 	if (myid .eq. 0) then
-		do i=0,n+1
-			write(*,'(10f5.1)'),up(i,0:n+1)
+		do i=1,indexspan
+			write(*,'(10f5.1)'),slab1(1:n+2,i)
 		enddo
 	endif
 
 	deallocate(slab1)
 	deallocate(slab2)
-	deallocate(slab1p)
-	deallocate(slab2p)
 	call MPI_Finalize(ierr)
 end program
 
