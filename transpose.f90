@@ -6,7 +6,6 @@ program trans
 	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE), dt_slab, req
 	integer n, i, j, k, step, startindex, indexspan, stage, slabsize
 	integer id1, id2
-	real*8 :: wtf
 	parameter (n=8)
 
 	! probably could use allocatable arrays to reduce memory duplication
@@ -35,7 +34,6 @@ program trans
 	! dx might actually be 1/(n+1)
 	dx = 1d0/n
 	dt = 0.01d0
-	wtf = 10.0
 
 	! initialize things to 0
 	slab1 = 0.0
@@ -71,14 +69,17 @@ program trans
 			!i2 = i+startindex-1
 			! load up d
 			do k=2,n+1
-				d(k) = slab1(k,i+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,i) + slab1(k,i-1)
+				d(k-1) = slab1(k,i+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,i) + slab1(k,i-1)
 			enddo
 			! call tridi
+			if (myid .eq. 0) then
+				write(*,'(8f5.1)'), d
+			endif
 			call solve_tridiag(a,b,c,d,x,n)
 			! load result into other matrix
 			slab2(2:n+1,i) = x
 		enddo
-		slab1(1:n+2,1:indexspan+2) = slab2(1:n+2,1:indexspan+2)
+		slab1 = slab2
 		! START TRANSPOSE		
 !		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
 		! END TRANSPOSE
