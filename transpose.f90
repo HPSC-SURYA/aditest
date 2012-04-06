@@ -63,7 +63,7 @@ program trans
 	call MPI_Barrier(MPI_COMM_WORLD, ierr)
 
 	! start time-stepping
-	do step=1,1
+	do step=1,10
 		! start in one direction
 		do i=2,indexspan+1
 			!i2 = i+startindex-1
@@ -82,16 +82,17 @@ program trans
 		! END TRANSPOSE
 
 		! now do other direction
-!		do j=1,indexspan
-!			do k=2,n+1
-!				d(k) = slab1(k,j+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,j) + slab1(k,j-1)
-!			enddo
-!			call solve_tridiag(a,b,c,d,x,n)
+		do j=2,indexspan+1
+			do k=2,n+1
+				d(k-1) = slab1(k,j+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,j) + slab1(k,j-1)
+			enddo
+			call solve_tridiag(a,b,c,d,x,n)
 			! back to original matrix
-!			slab2(2:n+1,j) = x
-!		enddo
+			slab2(2:n+1,j) = x
+		enddo
 
 		! transpose back
+		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
 	enddo
 
 	! output to screen
@@ -122,12 +123,13 @@ end program
 subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvslab)
 	include "mpif.h"
 	integer myid, numproc, slablength, blocklength, offset
-	real*8 sendslab(slablength+2, slablength+2), recvslab(slablength+2, slablength+2)
-	real*8 block(blocklength, blocklength)
+	real*8 sendslab(slablength+2, blocklength+2), recvslab(slablength+2, blocklength+2)
+	real*8 block(blocklength, blocklength+2)
+	real*8 blockt(blocklength+2, blocklength)
 	integer ii, ij, ii2, ik, ierror, stat(MPI_STATUS_SIZE)
 	integer blocksize
 
-	blocksize = blocklength*blocklength
+	blocksize = blocklength*(blocklength+2)
 
 	do ii2=0,numproc-1
 		ii = ii2 ! something terrible is happening
@@ -135,28 +137,24 @@ subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvs
 			! send everything
 			do ij=0,numproc-1
 				if (ij .ne. myid) then
-		!			write(*,*), "proc ", myid, "sending to ", ij
+	!				write(*,*), "proc ", myid, "sending to ", ij
 					offset = ij*blocklength
-					block = transpose(sendslab(2+offset:1+blocklength+offset, 2:1+blocklength))
-					write(*,*), myid, ij
-					do ik=1,blocklength
-							write(*,'(4f5.1)') block(:,ik)
-					enddo
-					call MPI_SEND(block, blocksize, MPI_REAL8, ij, 0, MPI_COMM_WORLD, ierror)
-		!			write(*,*), "proc ", myid, "sent to ", ij
+					blockt = sendslab(1+offset:2+blocklength+offset, 2:1+blocklength)
+					call MPI_SEND(blockt, blocksize, MPI_REAL8, ij, 0, MPI_COMM_WORLD, ierror)
+	!				write(*,*), "proc ", myid, "sent to ", ij
 				else
 					offset = ij*blocklength
-					block = transpose(sendslab(2+offset:1+blocklength+offset, 2:1+blocklength))
-					recvslab(2+offset:1+blocklength+offset, 2:1+blocklength) = block
+					blockt = sendslab(1+offset:2+blocklength+offset, 2:1+blocklength)
+					recvslab(2+offset:1+blocklength+offset, 1:2+blocklength) = transpose(blockt)
 				endif
 			enddo
 		else
 			! recv from ii
-		!	write(*,*), "proc ", myid, "post recv from ", ii
-			call MPI_RECV(block, blocksize, MPI_REAL8, ii, 0, MPI_COMM_WORLD, stat, ierror)
+	!		write(*,*), "proc ", myid, "post recv from ", ii
+			call MPI_RECV(blockt, blocksize, MPI_REAL8, ii, 0, MPI_COMM_WORLD, stat, ierror)
 			offset = ii*blocklength
-			recvslab(2+offset:1+blocklength+offset, 2:1+blocklength) = block
-		!	write(*,*), "proc ", myid, "recv from ", ii
+			recvslab(2+offset:1+blocklength+offset, 1:2+blocklength) = transpose(blockt)
+	!		write(*,*), "proc ", myid, "recv from ", ii
 		endif
 		call MPI_BARRIER(MPI_COMM_WORLD, ierror)
 	enddo
