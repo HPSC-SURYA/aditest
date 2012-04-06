@@ -6,7 +6,7 @@ program trans
 	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE), dt_slab, req
 	integer n, i, j, k, step, startindex, indexspan, stage, slabsize
 	integer id1, id2
-	parameter (n=16)
+	parameter (n=8)
 
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
@@ -37,23 +37,9 @@ program trans
 
 	! initialize things to 0
 	slab1 = 0.0
-	slab1(1,:) = 1d0
-	slab1(n+2,:) = 1d0
-	if (myid .eq. 0) then
-		slab1(:,1) = 1d0
-	endif
-	if (myid .eq. numproc-1) then
-		slab1(:,indexspan+2) = 1d0
-	endif
 	slab2 = 0.0
-	slab2(1,:) = 1d0
-	slab2(n+2,:) = 1d0
-	if (myid .eq. 0) then
-		slab2(:,1) = 1d0
-	endif
-	if (myid .eq. numproc-1) then
-		slab2(:,indexspan+2) = 1d0
-	endif
+	call boundary(myid, numproc, slab1, n, indexspan)
+	call boundary(myid, numproc, slab2, n, indexspan)
 
 	! these never change, precompute
 	a = -1d0
@@ -63,7 +49,7 @@ program trans
 	call MPI_Barrier(MPI_COMM_WORLD, ierr)
 
 	! start time-stepping
-	do step=1,10
+	do step=1,1
 		! start in one direction
 		do i=2,indexspan+1
 			!i2 = i+startindex-1
@@ -71,21 +57,24 @@ program trans
 			do k=2,n+1
 				d(k-1) = slab1(k,i+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,i) + slab1(k,i-1)
 			enddo
+			! deal with boundary conditions
+			d(1) = d(1) + slab1(1,i)
+			d(n) = d(n) + slab1(n+2,i)
 			! call tridi
 			call solve_tridiag(a,b,c,d,x,n)
 			! load result into other matrix
 			slab2(2:n+1,i) = x
 		enddo
-!		slab1 = slab2
-		! START TRANSPOSE		
+		! START TRANSPOSE
 		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
 		! END TRANSPOSE
-
 		! now do other direction
 		do j=2,indexspan+1
 			do k=2,n+1
 				d(k-1) = slab1(k,j+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,j) + slab1(k,j-1)
 			enddo
+			d(1) = d(1) + slab1(1,j)
+			d(n) = d(n) + slab1(n+2,j)
 			call solve_tridiag(a,b,c,d,x,n)
 			! back to original matrix
 			slab2(2:n+1,j) = x
@@ -99,13 +88,13 @@ program trans
 	if (myid .eq. 0) then
 		write(*,*), myid
 		do i=1,indexspan+2
-			write(*,'(18f5.1)'),slab1(1:n+2,i)
+			write(*,'(10f5.1)'),slab1(1:n+2,i)
 		enddo
 		do i=1,numproc-1
 			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
 			write(*,*), i
 			do j=1,indexspan+2
-				write(*,'(18f5.1)'),slab1(1:n+2,j)
+				write(*,'(10f5.1)'),slab1(1:n+2,j)
 			enddo
 		enddo
 	else
@@ -200,6 +189,22 @@ subroutine transposeMPI(myid, numproc)
 	
 end subroutine transposeMPI
 
+
+subroutine boundary(myid, numproc, slab, slablength, blocklength)
+	implicit none
+	integer myid, numproc, slablength, blocklength
+	real*8 slab(slablength+2, blocklength+2)
+
+	! set boundary conditions
+	slab(1,:) = 1d0
+	slab(slablength+2,:) = 1d0
+	if (myid .eq. 0) then
+		slab(:,1) = 1d0
+	endif
+	if (myid .eq. numproc-1) then
+		slab(:,blocklength+2) = 1d0
+	endif
+end subroutine boundary
 
 ! SHAMELESSLY stolen from wikipedia
 subroutine solve_tridiag(a,b,c,v,x,n)
