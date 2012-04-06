@@ -6,13 +6,16 @@ program trans
 	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE), dt_slab, req
 	integer n, i, j, k, step, startindex, indexspan, stage, slabsize
 	integer id1, id2
-	parameter (n=8)
+	parameter (n=32)
 
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
 	real*8, dimension(:,:), allocatable :: slab1, slab2, slabrecv
 	real*8 a(n), b(n), c(n), d(n), x(n)
 	real*8 dx, dt, dt2
+
+	! timing stuff
+	real*8 t0, t1, t2, avgtime
 
 
 	! MPI goodness
@@ -47,9 +50,9 @@ program trans
 	c = -1d0
 
 	call MPI_Barrier(MPI_COMM_WORLD, ierr)
-
+	t0 = MPI_WTIME()
 	! start time-stepping
-	do step=1,1
+	do step=1,1000
 		! start in one direction
 		do i=2,indexspan+1
 			!i2 = i+startindex-1
@@ -83,23 +86,31 @@ program trans
 		! transpose back
 		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
 	enddo
+	t1 = MPI_WTIME();
+
+	t2 = t1-t0
+
+	call MPI_ALLREDUCE(t2, avgtime, 1, MPI_REAL8, MPI_SUM, MPI_COMM_WORLD, ierr)
+	if (myid .eq. 0) then
+		write(*,*), avgtime/numproc
+	endif
 
 	! output to screen
-	if (myid .eq. 0) then
-		write(*,*), myid
-		do i=1,indexspan+2
-			write(*,'(10f5.1)'),slab1(1:n+2,i)
-		enddo
-		do i=1,numproc-1
-			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
-			write(*,*), i
-			do j=1,indexspan+2
-				write(*,'(10f5.1)'),slab1(1:n+2,j)
-			enddo
-		enddo
-	else
-		call MPI_SEND(slab1, 1, dt_slab, 0, 5, MPI_COMM_WORLD, ierr)
-	endif
+!	if (myid .eq. 0) then
+!		write(*,*), myid
+!		do i=1,indexspan+2
+!			write(*,'(10f5.1)'),slab1(1:n+2,i)
+!		enddo
+!		do i=1,numproc-1
+!			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
+!			write(*,*), i
+!			do j=1,indexspan+2
+!				write(*,'(10f5.1)'),slab1(1:n+2,j)
+!			enddo
+!		enddo
+!	else
+!		call MPI_SEND(slab1, 1, dt_slab, 0, 5, MPI_COMM_WORLD, ierr)
+!	endif
 
 	deallocate(slab1)
 	deallocate(slab2)
