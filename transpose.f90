@@ -6,11 +6,11 @@ program trans
 	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE), dt_slab, req
 	integer n, i, j, k, step, startindex, indexspan, stage, slabsize
 	integer id1, id2
-	parameter (n=32)
+	parameter (n=8)
 
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
-	real*8, dimension(:,:), allocatable :: slab1, slab2, slabrecv
+	real*8, dimension(:,:), allocatable :: slab1, slab2, slabt, slabt2
 	real*8 a(n), b(n), c(n), d(n), x(n)
 	real*8 dx, dt, dt2
 
@@ -29,7 +29,8 @@ program trans
 	! both slabs are columnar to speed things up? sure.
 	allocate(slab1(n+2,indexspan+2))
 	allocate(slab2(n+2,indexspan+2))
-	allocate(slabrecv(n+2,indexspan+2))
+	allocate(slabt(indexspan+2,n+2))
+	allocate(slabt2(indexspan+2,n+2))
 
 	call MPI_TYPE_CONTIGUOUS(slabsize, MPI_DOUBLE_PRECISION, dt_slab, ierr)
 	call MPI_TYPE_COMMIT(dt_slab, ierr)
@@ -41,8 +42,11 @@ program trans
 	! initialize things to 0
 	slab1 = 0.0
 	slab2 = 0.0
+	slabt = 0.0
 	call boundary(myid, numproc, slab1, n, indexspan)
 	call boundary(myid, numproc, slab2, n, indexspan)
+	call boundary2(myid, numproc, slabt, n, indexspan)
+	call boundary2(myid, numproc, slabt2, n, indexspan)
 
 	! these never change, precompute
 	a = -1d0
@@ -69,22 +73,22 @@ program trans
 			slab2(2:n+1,i) = x
 		enddo
 		! START TRANSPOSE
-		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
+		call stransposeMPI(myid, numproc, n, indexspan, slab2, slabt)
 		! END TRANSPOSE
 		! now do other direction
 		do j=2,indexspan+1
 			do k=2,n+1
-				d(k-1) = slab1(k,j+1) + 2d0*(dx*dx/dt-1d0)*slab1(k,j) + slab1(k,j-1)
+				d(k-1) = slabt(j+1,k) + 2d0*(dx*dx/dt-1d0)*slabt(j,k) + slabt(j-1,k)
 			enddo
-			d(1) = d(1) + slab1(1,j)
-			d(n) = d(n) + slab1(n+2,j)
+			d(1) = d(1) + slabt(j,1)
+			d(n) = d(n) + slabt(j,n+2)
 			call solve_tridiag(a,b,c,d,x,n)
 			! back to original matrix
-			slab2(2:n+1,j) = x
+			slabt2(j,2:n+1) = x
 		enddo
 
 		! transpose back
-		call stransposeMPI(myid, numproc, n, indexspan, slab2, slab1)
+		call stransposeMPI2(myid, numproc, n, indexspan, slabt2, slab1)
 	enddo
 	t1 = MPI_WTIME();
 
@@ -96,24 +100,26 @@ program trans
 	endif
 
 	! output to screen
-!	if (myid .eq. 0) then
-!		write(*,*), myid
-!		do i=1,indexspan+2
-!			write(*,'(10f5.1)'),slab1(1:n+2,i)
-!		enddo
-!		do i=1,numproc-1
-!			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
-!			write(*,*), i
-!			do j=1,indexspan+2
-!				write(*,'(10f5.1)'),slab1(1:n+2,j)
-!			enddo
-!		enddo
-!	else
-!		call MPI_SEND(slab1, 1, dt_slab, 0, 5, MPI_COMM_WORLD, ierr)
-!	endif
+	if (myid .eq. 0) then
+		write(*,*), myid
+		do i=1,indexspan+2
+			write(*,'(10f5.1)'),slab1(1:n+2,i)
+		enddo
+		do i=1,numproc-1
+			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
+			write(*,*), i
+			do j=1,indexspan+2
+				write(*,'(10f5.1)'),slab1(1:n+2,j)
+			enddo
+		enddo
+	else
+		call MPI_SEND(slab1, 1, dt_slab, 0, 5, MPI_COMM_WORLD, ierr)
+	endif
 
 	deallocate(slab1)
 	deallocate(slab2)
+	deallocate(slabt)
+	deallocate(slabt2)
 	call MPI_TYPE_FREE(dt_slab, ierr)
 	call MPI_Finalize(ierr)
 end program
@@ -123,7 +129,7 @@ end program
 subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvslab)
 	include "mpif.h"
 	integer myid, numproc, slablength, blocklength, offset
-	real*8 sendslab(slablength+2, blocklength+2), recvslab(slablength+2, blocklength+2)
+	real*8 sendslab(slablength+2, blocklength+2), recvslab(blocklength+2, slablength+2)
 	real*8 block(blocklength, blocklength+2)
 	real*8 blockt(blocklength+2, blocklength)
 	integer ii, ij, ii2, ik, ierror, stat(MPI_STATUS_SIZE)
@@ -145,7 +151,7 @@ subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvs
 				else
 					offset = ij*blocklength
 					blockt = sendslab(1+offset:2+blocklength+offset, 2:1+blocklength)
-					recvslab(2+offset:1+blocklength+offset, 1:2+blocklength) = transpose(blockt)
+					recvslab(1:2+blocklength, 2+offset:1+blocklength+offset) = blockt
 				endif
 			enddo
 		else
@@ -153,15 +159,53 @@ subroutine stransposeMPI(myid, numproc, slablength, blocklength, sendslab, recvs
 	!		write(*,*), "proc ", myid, "post recv from ", ii
 			call MPI_RECV(blockt, blocksize, MPI_REAL8, ii, 0, MPI_COMM_WORLD, stat, ierror)
 			offset = ii*blocklength
-			recvslab(2+offset:1+blocklength+offset, 1:2+blocklength) = transpose(blockt)
+			recvslab(1:2+blocklength, 2+offset:1+blocklength+offset) = blockt
 	!		write(*,*), "proc ", myid, "recv from ", ii
 		endif
 		call MPI_BARRIER(MPI_COMM_WORLD, ierror)
 	enddo
-
-!	write(*,*), "proc ", myid, "transpose done"
 end subroutine stransposeMPI
 
+! this is the transpose of the transpose. er. whatever.
+subroutine stransposeMPI2(myid, numproc, slablength, blocklength, sendslab, recvslab)
+	include "mpif.h"
+	integer myid, numproc, slablength, blocklength, offset
+	real*8 sendslab(blocklength+2, slablength+2), recvslab(slablength+2, blocklength+2)
+	real*8 block(blocklength, blocklength+2)
+	real*8 blockt(blocklength+2, blocklength)
+	integer ii, ij, ii2, ik, ierror, stat(MPI_STATUS_SIZE)
+	integer blocksize
+
+	blocksize = blocklength*(blocklength+2)
+
+	do ii2=0,numproc-1
+		ii = ii2 ! something terrible is happening
+		if (ii .eq. myid) then
+			! send everything
+			do ij=0,numproc-1
+				if (ij .ne. myid) then
+	!				write(*,*), "proc ", myid, "sending to ", ij
+					offset = ij*blocklength
+					block = sendslab(2:1+blocklength, 1+offset:2+blocklength+offset)
+					call MPI_SEND(block, blocksize, MPI_REAL8, ij, 0, MPI_COMM_WORLD, ierror)
+	!				write(*,*), "proc ", myid, "sent to ", ij
+				else
+					offset = ij*blocklength
+					block = sendslab(2:1+blocklength, 1+offset:2+blocklength+offset)
+					recvslab(2+offset:1+blocklength+offset, 1:2+blocklength) = block
+				endif
+			enddo
+		else
+			! recv from ii
+	!		write(*,*), "proc ", myid, "post recv from ", ii
+			call MPI_RECV(block, blocksize, MPI_REAL8, ii, 0, MPI_COMM_WORLD, stat, ierror)
+			offset = ii*blocklength
+			recvslab(2+offset:1+blocklength+offset, 1:2+blocklength) = block
+	!		write(*,*), "proc ", myid, "recv from ", ii
+		endif
+		call MPI_BARRIER(MPI_COMM_WORLD, ierror)
+	enddo
+end subroutine stransposeMPI2
 
 ! this is the advanced (faster) version that doesnt work at all
 subroutine transposeMPI(myid, numproc)
@@ -200,7 +244,6 @@ subroutine transposeMPI(myid, numproc)
 	
 end subroutine transposeMPI
 
-
 subroutine boundary(myid, numproc, slab, slablength, blocklength)
 	implicit none
 	integer myid, numproc, slablength, blocklength
@@ -216,6 +259,23 @@ subroutine boundary(myid, numproc, slab, slablength, blocklength)
 		slab(:,blocklength+2) = 1d0
 	endif
 end subroutine boundary
+
+! this is the transpose of the other one
+subroutine boundary2(myid, numproc, slab, slablength, blocklength)
+	implicit none
+	integer myid, numproc, slablength, blocklength
+	real*8 slab(blocklength+2, slablength+2)
+
+	! set boundary conditions
+	slab(:,1) = 1d0
+	slab(:,slablength+2) = 1d0
+	if (myid .eq. 0) then
+		slab(1,:) = 1d0
+	endif
+	if (myid .eq. numproc-1) then
+		slab(blocklength+2,:) = 1d0
+	endif
+end subroutine boundary2
 
 ! SHAMELESSLY stolen from wikipedia
 subroutine solve_tridiag(a,b,c,v,x,n)
