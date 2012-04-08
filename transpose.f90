@@ -6,7 +6,7 @@ program trans
 	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE), dt_slab, req
 	integer n, i, j, k, step, startindex, indexspan, stage, slabsize
 	integer id1, id2
-	parameter (n=8)
+	parameter (n=512)
 
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
@@ -100,21 +100,21 @@ program trans
 	endif
 
 	! output to screen
-	if (myid .eq. 0) then
-		write(*,*), myid
-		do i=1,indexspan+2
-			write(*,'(10f5.1)'),slab1(1:n+2,i)
-		enddo
-		do i=1,numproc-1
-			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
-			write(*,*), i
-			do j=1,indexspan+2
-				write(*,'(10f5.1)'),slab1(1:n+2,j)
-			enddo
-		enddo
-	else
-		call MPI_SEND(slab1, 1, dt_slab, 0, 5, MPI_COMM_WORLD, ierr)
-	endif
+!	if (myid .eq. 0) then
+!		write(*,*), myid
+!		do i=1,indexspan+2
+!			write(*,'(10f5.1)'),slab1(1:n+2,i)
+!		enddo
+!		do i=1,numproc-1
+!			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
+!			write(*,*), i
+!			do j=1,indexspan+2
+!				write(*,'(10f5.1)'),slab1(1:n+2,j)
+!			enddo
+!		enddo
+!	else
+!		call MPI_SEND(slab1, 1, dt_slab, 0, 5, MPI_COMM_WORLD, ierr)
+!	endif
 
 	deallocate(slab1)
 	deallocate(slab2)
