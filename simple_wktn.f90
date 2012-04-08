@@ -13,10 +13,10 @@ program simple_wktn
 	implicit none
 	include "mpif.h"
 
-	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE)
+	integer myid, numproc, ierr, req, stat(MPI_STATUS_SIZE)
 	! if you forget that (MPI_..) may Zeus strike you down
 	real*8, dimension(:), allocatable :: w, a, b
-	real*8 corr, acorr
+	real*8 corr, acorr, sendcorr
 	integer startindex, indexspan, n, ii, ij
 	parameter (n=16)
 
@@ -60,7 +60,8 @@ program simple_wktn
 		w(indexspan) = w(indexspan) + acorr*corr
 	endif
 	if (myid .ne. numproc-1) then
-		call MPI_Send(w(indexspan), 1, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, ierr)
+		sendcorr = w(indexspan)
+		call MPI_Isend(sendcorr, 1, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, req, ierr)
 	endif
 
 	! Correction Phase
@@ -70,6 +71,7 @@ program simple_wktn
 		w(ii) = w(ii) + acorr*corr
 	enddo
 
+	call MPI_Wait(req, stat, ierr)
 
 	! output
 	do ii=0,numproc-1
