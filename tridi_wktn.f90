@@ -31,6 +31,12 @@ program tridi_wktn
 	c = 1d0
 	d = -5d-1
 
+	! we want to precompute bp
+	bp(1) = b(1)
+	do ii=2,n
+		bp(ii) = b(ii) - (a(ii)/bp(ii-1))*c(ii-1)
+	enddo
+
 	! for testing on 1 processor
 !	if (numproc .eq. 1) then
 !		call solve_tridiag(a,b,c,d,x,n)
