@@ -7,7 +7,7 @@ program tridi_wktn
 	include "mpif.h"
 	
 	integer n, myid, numproc, ierr, stat(MPI_STATUS_SIZE)
-	real*8, dimension(:), allocatable :: a, b, c, d, x, bp
+	real*8, dimension(:), allocatable :: a, b, c, d, x, bp, acorr
 	integer indexspan, startindex, ii
 	parameter (n=8)
 
@@ -24,6 +24,7 @@ program tridi_wktn
 	allocate(d(n))
 	allocate(x(indexspan))
 	allocate(bp(n))
+	allocate(acorr(indexspan))
 
 	! initialize things
 	a = 1d0
@@ -36,6 +37,15 @@ program tridi_wktn
 	do ii=2,n
 		bp(ii) = b(ii) - (a(ii)/bp(ii-1))*c(ii-1)
 	enddo
+
+	! we also want to pre-compute the correction coefs for the entire vector
+	acorr = 0d0
+	if (myid .ne. 0) then
+		acorr(1) = -a(startindex)/bp(startindex-1)
+		do ii=2,indexspan
+			acorr(ii) = acorr(ii-1) * (-a(startindex+ii-1)/bp(startindex+ii-1))
+		enddo
+	endif
 
 	! for testing on 1 processor
 !	if (numproc .eq. 1) then
