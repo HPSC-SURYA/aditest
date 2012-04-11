@@ -49,9 +49,9 @@ program tridi_wktn
 	endif
 	acorr2 = 0d0
 	if (myid .ne. numproc-1) then
-		acorr2(indexspan) = c(startindex+indexspan-1)/bp(startindex+indexspan-1)
+		acorr2(indexspan) = -c(startindex+indexspan-1)/bp(startindex+indexspan-1)
 		do ii=indexspan-1,1,-1
-			acorr2(ii) = (c(startindex+ii-1)/bp(startindex+ii-1)) * acorr2(ii+1)
+			acorr2(ii) = (-c(startindex+ii-1)/bp(startindex+ii-1)) * acorr2(ii+1)
 		enddo
 	endif
 
@@ -117,7 +117,7 @@ subroutine tridi(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,startindex)
 	! Guess Phase
 	x(indexspan) = vp(indexspan)/bp(indexspan+startindex-1)
 	do ii=indexspan-1,1,-1
-		x(ii) = vp(ii)/bp(indexspan+ii-1) - (c(indexspan+ii-1)/bp(indexspan+ii-1))*x(ii+1)
+		x(ii) = vp(ii)/bp(startindex+ii-1) - (c(startindex+ii-1)/bp(startindex+ii-1))*x(ii+1)
 	enddo
 	! Propagation Phase
 	if (myid .ne. numproc-1) then
