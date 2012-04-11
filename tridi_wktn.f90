@@ -7,7 +7,7 @@ program tridi_wktn
 	include "mpif.h"
 	
 	integer n, myid, numproc, ierr, stat(MPI_STATUS_SIZE)
-	real*8, dimension(:), allocatable :: a, b, c, d, x, bp, acorr
+	real*8, dimension(:), allocatable :: a, b, c, d, x, bp, acorr, acorr2
 	integer indexspan, startindex, ii
 	parameter (n=8)
 
@@ -25,6 +25,7 @@ program tridi_wktn
 	allocate(x(indexspan))
 	allocate(bp(n))
 	allocate(acorr(indexspan))
+	allocate(acorr2(indexspan))
 
 	! initialize things
 	a = 1d0
@@ -37,29 +38,35 @@ program tridi_wktn
 	do ii=2,n
 		bp(ii) = b(ii) - (a(ii)/bp(ii-1))*c(ii-1)
 	enddo
-
+	
 	! we also want to pre-compute the correction coefs for the entire vector
 	acorr = 0d0
 	if (myid .ne. 0) then
 		acorr(1) = -a(startindex)/bp(startindex-1)
 		do ii=2,indexspan
-			acorr(ii) = acorr(ii-1) * (-a(startindex+ii-1)/bp(startindex+ii-1))
+			acorr(ii) = (-a(startindex+ii-1)/bp(startindex+ii-2)) * acorr(ii-1)
+		enddo
+	endif
+	acorr2 = 0d0
+	if (myid .ne. numproc-1) then
+		acorr2(indexspan) = c(startindex+indexspan-1)/bp(startindex+indexspan-1)
+		do ii=indexspan-1,1,-1
+			acorr2(ii) = (c(startindex+ii-1)/bp(startindex+ii-1)) * acorr2(ii+1)
 		enddo
 	endif
 
 	! for testing on 1 processor
-!	if (numproc .eq. 1) then
-!		call solve_tridiag(a,b,c,d,x,n)
-!	endif
-
-	call tridi_condition(a,b,c,d,n,bp)
-
+	if (numproc .eq. 1) then
+		call solve_tridiag(a,b,c,d,x,n)
+	else
+		call tridi(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,startindex)
+	endif
 
 	! output
 	do ii=0,numproc-1
 		if (myid .eq. ii) then
 			write(*,*), "proc", myid
-			write(*,'(4f8.1)'), x
+			write(*,'(8f8.2)'), x
 		endif
 		call MPI_Barrier(MPI_COMM_WORLD, ierr)
 	enddo
@@ -70,68 +77,65 @@ program tridi_wktn
 end program tridi_wktn
 
 
-subroutine tridi_condition(a,b,c,d,n,bp)
-	implicit none
-	integer n, ii
-	real(8), dimension(n) :: a,b,c,d,bp
-
-	bp(1) = b(1)
-	do ii=2,n
-		bp(ii) = b(ii) - (a(ii)/bp(ii-1))*c(ii-1)
-	enddo
-
-end subroutine tridi_condition
-
 ! the magic happens here
-subroutine tridi(a,b,c,d,x,n,myid,numproc)
+subroutine tridi(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,startindex)
 	implicit none
 	include "mpif.h"
-	integer n, myid, numproc, ii, ierr, stat(MPI_STATUS_SIZE), req
-	real(8), dimension(n) ::  a,b,c,d ! apparently needs the ::
-	real(8), dimension(n) :: x, acorr
-	real(8), dimension(n) :: bp, vp
+	integer n, myid, numproc, ii, ierr, req
+	integer stat(MPI_STATUS_SIZE)
+	integer indexspan, startindex
+	real(8), dimension(n) :: a,b,c,d,bp ! apparently needs the ::
+	real(8), dimension(indexspan) :: vp, x, acorr, acorr2
 	real(8) :: m, corr, sendcorr
-
-	! do first non-wakatani pass
-	bp(1) = b(1)
-	do ii=2,n
-		m = a(ii)/bp(ii-1)
-        bp(ii) = b(ii) - m*c(ii-1)
-	enddo
 
 ! Start First Pass
 	! Guess Phase
-	if (myid .eq. 0) then
-		vp(1) = d(1)
-	else
-		vp(1) = 0d0
-	endif
-	acorr(1) = 1d0
-	do ii=2,n
-		m = a(ii)/bp(ii-1)
-		vp(ii) = d(ii) - m*vp(ii-1)
-		acorr(ii) = acorr(ii-1) * (-m) ! prepare correction factor
+	vp(1) = d(startindex)
+	do ii=2,indexspan
+		m = a(startindex+ii-1)/bp(startindex+ii-2)
+		vp(ii) = d(startindex+ii-1) - m*vp(ii-1) ! fuck this line of code.
 	enddo
-
 	! Propagation Phase
 	if (myid .ne. 0) then
         call MPI_Recv(corr, 1, MPI_REAL8, myid-1, 0, MPI_COMM_WORLD, stat, ierr)
-		vp(n) = vp(n) + acorr(n)*corr
+		vp(indexspan) = vp(indexspan) + acorr(indexspan)*corr
 	endif
+	sendcorr = vp(indexspan) ! could have sworn this was different. whatevs.
 	if (myid .ne. numproc-1) then
-		sendcorr = vp(n)
 	    call MPI_Isend(sendcorr, 1, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, req, ierr)
 	endif
 
 	! Correction Phase
-!	acorr = 1d0
-!	do ii=1,indexspan-1
-!		acorr = acorr * a(ii)
-!		w(ii) = w(ii) + acorr*corr
-!	enddo
-!	call MPI_Wait(req, stat, ierr)
+	do ii=1,indexspan-1
+		vp(ii) = vp(ii) + acorr(ii)*corr
+	enddo
+	if (myid .ne. numproc-1) then
+		call MPI_Wait(req, stat, ierr)
+	endif
 
+! Start Second Phase
+	! Guess Phase
+	x(indexspan) = vp(indexspan)/bp(indexspan+startindex-1)
+	do ii=indexspan-1,1,-1
+		x(ii) = vp(ii)/bp(indexspan+ii-1) - (c(indexspan+ii-1)/bp(indexspan+ii-1))*x(ii+1)
+	enddo
+	! Propagation Phase
+	if (myid .ne. numproc-1) then
+        call MPI_Recv(corr, 1, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, stat, ierr)
+		x(1) = x(1) + acorr2(1)*corr
+	endif
+	sendcorr = x(1) ! could have sworn this was different. whatevs.
+	if (myid .ne. 0) then
+	    call MPI_Isend(sendcorr, 1, MPI_REAL8, myid-1, 0, MPI_COMM_WORLD, req, ierr)
+	endif
 
+	! Correction Phase
+	do ii=2,indexspan
+		x(ii) = x(ii) + acorr2(ii)*corr
+	enddo
+	if (myid .ne. 0) then
+		call MPI_Wait(req, stat, ierr)
+	endif
 
 end subroutine tridi
 

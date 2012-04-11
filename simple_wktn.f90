@@ -33,8 +33,8 @@ program simple_wktn
 	allocate(b(indexspan))
 	! pre-compute coefs
 	do ii=1,indexspan
-		a(ii) = 2d0
-		b(ii) = 0d0
+		a(ii) = 1.5d0
+		b(ii) = 1d0
 		w(ii) = 0d0
 	enddo
 	if (myid .eq. 0) then
