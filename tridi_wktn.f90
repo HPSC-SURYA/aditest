@@ -9,7 +9,9 @@ program tridi_wktn
 	integer n, myid, numproc, ierr, stat(MPI_STATUS_SIZE)
 	real*8, dimension(:), allocatable :: a, b, c, d, x, bp, acorr, acorr2
 	integer indexspan, startindex, ii
-	parameter (n=8)
+	parameter (n=2**24)
+
+	real*8 t0, t1, t2, avgtime
 
 	call MPI_Init(ierr)
 	call MPI_Comm_rank(MPI_COMM_WORLD, myid, ierr)
@@ -33,26 +35,29 @@ program tridi_wktn
 	c = 1d0
 	d = -5d-1
 
-	! we want to precompute bp
-	bp(1) = b(1)
-	do ii=2,n
-		bp(ii) = b(ii) - (a(ii)/bp(ii-1))*c(ii-1)
-	enddo
-	
-	! we also want to pre-compute the correction coefs for the entire vector
-	acorr = 0d0
-	if (myid .ne. 0) then
-		acorr(1) = -a(startindex)/bp(startindex-1)
-		do ii=2,indexspan
-			acorr(ii) = (-a(startindex+ii-1)/bp(startindex+ii-2)) * acorr(ii-1)
+	t0 = MPI_Wtime(ierr)
+	if (numproc .gt. 1) then
+		! we want to precompute bp
+		bp(1) = b(1)
+		do ii=2,n
+			bp(ii) = b(ii) - (a(ii)/bp(ii-1))*c(ii-1)
 		enddo
-	endif
-	acorr2 = 0d0
-	if (myid .ne. numproc-1) then
-		acorr2(indexspan) = -c(startindex+indexspan-1)/bp(startindex+indexspan-1)
-		do ii=indexspan-1,1,-1
-			acorr2(ii) = (-c(startindex+ii-1)/bp(startindex+ii-1)) * acorr2(ii+1)
-		enddo
+		
+		! we also want to pre-compute the correction coefs for the entire vector
+		acorr = 0d0
+		if (myid .ne. 0) then
+			acorr(1) = -a(startindex)/bp(startindex-1)
+			do ii=2,indexspan
+				acorr(ii) = (-a(startindex+ii-1)/bp(startindex+ii-2)) * acorr(ii-1)
+			enddo
+		endif
+		acorr2 = 0d0
+		if (myid .ne. numproc-1) then
+			acorr2(indexspan) = -c(startindex+indexspan-1)/bp(startindex+indexspan-1)
+			do ii=indexspan-1,1,-1
+				acorr2(ii) = (-c(startindex+ii-1)/bp(startindex+ii-1)) * acorr2(ii+1)
+			enddo
+		endif
 	endif
 
 	! for testing on 1 processor
@@ -61,15 +66,21 @@ program tridi_wktn
 	else
 		call tridi(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,startindex)
 	endif
+	t1 = MPI_Wtime(ierr) - t0
 
 	! output
 	do ii=0,numproc-1
 		if (myid .eq. ii) then
-			write(*,*), "proc", myid
-			write(*,'(8f8.2)'), x
+!			write(*,*), "proc", myid
+!			write(*,'(8f8.2)'), x
 		endif
 		call MPI_Barrier(MPI_COMM_WORLD, ierr)
 	enddo
+
+	call MPI_ALLREDUCE(t1, avgtime, 1, MPI_REAL8, MPI_SUM, MPI_COMM_WORLD, ierr)
+	if (myid .eq. 0) then
+		write(*,*) (avgtime/numproc)
+	endif
 
 	! too lazy to deallocate
 	call MPI_Finalize(ierr)
