@@ -35,7 +35,6 @@ program tridi_wktn
 	c = 1d0
 	d = -5d-1
 
-	t0 = MPI_Wtime(ierr)
 	if (numproc .gt. 1) then
 		! we want to precompute bp
 		bp(1) = b(1)
@@ -60,6 +59,7 @@ program tridi_wktn
 		endif
 	endif
 
+	t0 = MPI_Wtime()
 	! for testing on 1 processor
 	if (numproc .eq. 1) then
 		call solve_tridiag(a,b,c,d,x,n)
@@ -89,6 +89,7 @@ end program tridi_wktn
 
 
 ! the magic happens here
+! acorr, acorr2, and bp can all be computed once by a subroutine on program start
 subroutine tridi(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,startindex)
 	implicit none
 	include "mpif.h"
