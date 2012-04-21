@@ -7,9 +7,9 @@ program tridi_wktn_block
 	
 	integer n, myid, numproc, ierr, stat(MPI_STATUS_SIZE)
 	real*8, dimension(:,:), allocatable :: a, b, c, d, x, bp, acorr, acorr2
-	integer indexspan, startindex, ii, m
+	integer indexspan, startindex, ii, ij, m
 	parameter (n=8)
-	parameter (m=1) ! message length
+	parameter (m=4) ! message length
 
 	real*8 t0, t1, t2, avgtime
 
@@ -73,8 +73,10 @@ program tridi_wktn_block
 	! output
 	do ii=0,numproc-1
 		if (myid .eq. ii) then
-!			write(*,*), "proc", myid
-!			write(*,'(8f8.2)'), x
+			write(*,*), "proc", myid
+			do ij=1,indexspan
+				write(*,'(8f8.2)'), x(:,ij)
+			enddo
 		endif
 		call MPI_Barrier(MPI_COMM_WORLD, ierr)
 	enddo
@@ -99,7 +101,7 @@ subroutine tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,starti
 	integer n, myid, numproc, ii, ij, ierr
 	integer stat(MPI_STATUS_SIZE)
 	integer indexspan, startindex, m
-	integer numblocks, s, e, grow, crow, checkrecv, flag, done, z, span, recentcorr
+	integer numblocks, s, e, crow, checkrecv, flag, done, z, span
 	integer, dimension(numblocks) :: sendreq, recvreq
 	real(8), dimension(n,n) :: a,b,c,d,bp ! apparently needs the ::
 	real(8), dimension(n,indexspan) :: vp, x, acorr, acorr2
@@ -108,94 +110,110 @@ subroutine tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,starti
 	parameter (z=1) ! number of rows to calc while waiting
 
 ! Tridi pass 1
-	! post a bunch of recvs for checking later
-	if (myid .ne. 0) then
+	if (myid .eq. 0) then
+		! all root needs to do is calc and send off
+		do ii=1,numblocks
+			s=1+(ii-1)*m
+			e=ii*m
+			print*, "root calc from ",s," to ",e
+			vp(s:e,1) = d(s:e,startindex)
+			do ij=2,indexspan
+				vp(s:e,ij) = d(s:e,startindex+ij-1) - a(s:e,startindex+ij-1)*vp(s:e,ii-1)/bp(s:e,startindex+ij-2)
+			enddo
+			print*, "root isend block ",ii," to proc 1"
+			call MPI_Isend(vp(s:e,indexspan), m, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, sendreq(ii), ierr)
+		enddo
+	else
+		! post a bunch of recvs for checking later
 		do ii=1,numblocks
 			s = 1+(ii-1)*m
 			e = ii*m
 			print*, myid, "posting irecv of block ",ii," for later"
 			call MPI_Irecv(recvbuff(s:e), m, MPI_REAL8, myid-1, 0, MPI_COMM_WORLD, recvreq(ii), ierr)
 		enddo
-	endif
 
-	if (myid .eq. 0) then
-		! all root needs to do is calc and send off
-		do ii=1,numblocks
-			s=1+(ii-1)*m
-			e=ii*m
-			print*, "root calc from ",e," to ",s
-			vp(s:e,1) = d(s:e,startindex)
-			do ij=2,indexspan
-				vp(s:e,ij) = d(s:e,startindex+ij-1) - a(s:e,startindex+ij-1)*vp(s:e,ii-1)/bp(s:e,startindex+ij-2)
-			enddo
-			print*, "root isend block ",ii," to 1"
-			call MPI_Isend(vp(s:e,indexspan), m, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, sendreq(ii), ierr)
+		! cant do anything without the first block
+		print*, myid, "doing first block of guessing"
+		vp(1:m,1) = d(1:m,startindex)
+		do ij=2,indexspan
+			vp(1:m,ij) = d(1:m,startindex+ij-1) - a(1:m,startindex+ij-1)*vp(1:m,ii-1)/bp(1:m,startindex+ij-2)
 		enddo
-	else
-		grow = 1
 		crow = 1
-		recentcorr = 0
 		checkrecv = 1
 		! all other procs are waiting on recvs, so work on things
 		! assume blocks will come in order
 		done = 0
 		do while (done .eq. 0)
+			
 			! check for recv
 			call MPI_Test(recvreq(checkrecv), flag, stat, ierr)
 			! if recv'd, look for next one
 			if (flag .eq. 1) then
+				print*, myid, "recvd block ", checkrecv
 				! quickly correct final row and send it off
 				s = 1+(checkrecv-1)*m
 				e = checkrecv*m
 				vp(s:e,indexspan) = vp(s:e,indexspan) + acorr(s:e,indexspan)*recvbuff(s:e)
 				if (myid .ne. numproc-1) then
+					print*, myid, "propagating to next proc"
 					call MPI_Isend(vp(s:e,indexspan), m, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, sendreq(checkrecv), ierr)
 				endif
 				checkrecv = checkrecv + 1
 				! if recvd all, exit while loop
 				if (checkrecv .gt. numblocks) then
+					print*, myid, "all blocks recvd"
 					done = 1
+				else
+					! still have more blocks to come
+					! make sure guess is prepped
+					s = e+1 ! next block
+					e = e+m
+					vp(s:e,1) = d(s:e,startindex)
+					do ij=2,indexspan
+						vp(s:e,ij) = d(s:e,startindex+ij-1) - a(s:e,startindex+ij-1)*vp(s:e,ii-1)/bp(s:e,startindex+ij-2)
+					enddo
 				endif
-			endif
-			! calc a few rows, either guess or correct
-			if (grow .le. n) then ! if still have guessing to do
-				! guess some rows
+			else
+
+			! correct a few rows
+			if (crow .le. n) then
 				span = z
-				if (grow+span-1 .gt. n) then
-					span = n-grow+1
-				endif
-				! guess from (grow : grow+span-1)
-				s = grow
-				e = grow+span-1
-				print*, myid, "wasting time guessing from ",s," to ",e
-				vp(s:e,1) = d(s:e,startindex)
-				do ij=2,indexspan
-					vp(s:e,ij) = d(s:e,startindex+ij-1) - a(s:e,startindex+ij-1)*vp(s:e,ii-1)/bp(s:e,startindex+ij-2)
-				enddo
-				grow = grow + span
-			else ! if not, go on to correct things
-				span = z
+!				print*,myid,"waste time?",span,crow,n,checkrecv
 				if (crow+span-1 .gt. n) then
 					span = n-crow+1
 				endif
 				! dont correct if havent recvd a block yet
 				if (crow+span-1 .gt. m*(checkrecv-1)) then
-					span = m*(checkrecv+1)-crow+1
+					span = m*(checkrecv-1)-crow+1
+!					print*,myid,"trunc2 to",span
 				endif
 				! correct from row (crow : crow+span-1)
-				s = crow
-				e = crow+span-1
-				print*, myid, "wasting time correcting from ",s," to ",e
-				do ij=1,indexspan-1
-					vp(s:e,ij) = vp(s:e,ij) + acorr(s:e,ij)*recvbuff(s:e)
-				enddo
-				crow = crow + span
-				recentcorr = recentcorr + span
+				if (span .gt. 0) then
+					s = crow
+					e = crow+span-1
+					print*, myid, "wasting time correcting from ",s," to ",e
+					do ij=1,indexspan-1
+						vp(s:e,ij) = vp(s:e,ij) + acorr(s:e,ij)*recvbuff(s:e)
+					enddo
+					crow = crow + span
+				endif
 			endif
+
+			endif
+
 		end do
+		! correct remaining things
+		if (crow .le. n) then
+			s = crow
+			e = n
+			print*, myid, "computing rest of corrections from ",s," to ",e
+			do ij=1,indexspan-1
+				vp(s:e,ij) = vp(s:e,ij) + acorr(s:e,ij)*recvbuff(s:e)
+			enddo
+		endif
 	endif
 
-
+	x = vp
 
 ! Start Second Phase
 	! Guess Phase
