@@ -14,3 +14,6 @@ tridi_wktn : tridi_wktn.f90
 
 tridi_wktn_block : tridi_wktn_block.f90
 	mpif90 -o tridi_wktn_block tridi_wktn_block.f90
+
+evolve_wktn : evolve_wktn.f90
+	mpif90 -o evolve_wktn evolve_wktn.f90
