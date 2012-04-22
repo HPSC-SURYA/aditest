@@ -251,13 +251,13 @@ subroutine boundary(myid, numproc, slab, slablength, blocklength)
 
 	! set boundary conditions
 	slab(1,:) = 1d0
-	slab(slablength+2,:) = 1d0
-	if (myid .eq. 0) then
-		slab(:,1) = 1d0
-	endif
-	if (myid .eq. numproc-1) then
-		slab(:,blocklength+2) = 1d0
-	endif
+!	slab(slablength+2,:) = 1d0
+!	if (myid .eq. 0) then
+!		slab(:,1) = 1d0
+!	endif
+!	if (myid .eq. numproc-1) then
+!		slab(:,blocklength+2) = 1d0
+!	endif
 end subroutine boundary
 
 ! this is the transpose of the other one
@@ -267,14 +267,14 @@ subroutine boundary2(myid, numproc, slab, slablength, blocklength)
 	real*8 slab(blocklength+2, slablength+2)
 
 	! set boundary conditions
-	slab(:,1) = 1d0
-	slab(:,slablength+2) = 1d0
+!	slab(:,1) = 1d0
+!	slab(:,slablength+2) = 1d0
 	if (myid .eq. 0) then
 		slab(1,:) = 1d0
 	endif
-	if (myid .eq. numproc-1) then
-		slab(blocklength+2,:) = 1d0
-	endif
+!	if (myid .eq. numproc-1) then
+!		slab(blocklength+2,:) = 1d0
+!	endif
 end subroutine boundary2
 
 ! SHAMELESSLY stolen from wikipedia

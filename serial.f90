@@ -32,8 +32,8 @@ program serial
 			do k=1,n
 				d(k) = u(i+1,k) + 2d0*(dx*dx/dt-1d0)*u(i,k) + u(i-1,k)
 			enddo
-			d(1) = d(1) + u(i,1)
-			d(n) = d(n) + u(i,n)
+			d(1) = d(1) + u(i,0)
+			d(n) = d(n) + u(i,n+1)
 			! call tridi
 			call solve_tridiag(a,b,c,d,x,n)
 			! load result into other matrix
@@ -45,8 +45,8 @@ program serial
 			do k=1,n
 				d(k) = up(k,j+1) + 2d0*(dx*dx/dt-1d0)*up(k,j) + up(k,j-1)
 			enddo
-			d(1) = d(1) + up(1,j)
-			d(n) = d(n) + up(n,j)
+			d(1) = d(1) + up(0,j)
+			d(n) = d(n) + up(n+1,j)
 			call solve_tridiag(a,b,c,d,x,n)
 			! back to original matrix
 			u(1:n,j) = x
@@ -55,9 +55,11 @@ program serial
 	enddo
 
 	! output to screen
-	do i=0,n+1
-		write(*,'(10f5.1)'),up(0:n+1,i)
+	open(25,file='out_serial')
+	do i=1,n
+		write(25,*),up(1:n,i)
 	enddo
+	close(25)
 
 end program
 
