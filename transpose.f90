@@ -6,7 +6,7 @@ program trans
 	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE), dt_slab, req
 	integer n, i, j, k, step, startindex, indexspan, stage, slabsize
 	integer id1, id2
-	parameter (n=512)
+	parameter (n=8)
 
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
@@ -99,22 +99,22 @@ program trans
 		write(*,*), avgtime/numproc
 	endif
 
-	! output to screen
-!	if (myid .eq. 0) then
-!		write(*,*), myid
-!		do i=1,indexspan+2
-!			write(*,'(10f5.1)'),slab1(1:n+2,i)
-!		enddo
-!		do i=1,numproc-1
-!			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
-!			write(*,*), i
-!			do j=1,indexspan+2
-!				write(*,'(10f5.1)'),slab1(1:n+2,j)
-!			enddo
-!		enddo
-!	else
-!		call MPI_SEND(slab1, 1, dt_slab, 0, 5, MPI_COMM_WORLD, ierr)
-!	endif
+	! output to file for legit comparing
+	if (myid .eq. 0) then
+		open(25,file='out_trans')
+		do i=2,indexspan+1
+			write(25,*),slab1(2:n+1,i)
+		enddo
+		do i=1,numproc-1
+			call MPI_RECV(slab1, 1, dt_slab, i, 5, MPI_COMM_WORLD, stat, ierr)
+			do j=2,indexspan+1
+				write(25,*),slab1(2:n+1,j)
+			enddo
+		enddo
+		close(25)
+	else
+		call MPI_SEND(slab1, 1, dt_slab, 0, 5, MPI_COMM_WORLD, ierr)
+	endif
 
 	deallocate(slab1)
 	deallocate(slab2)
