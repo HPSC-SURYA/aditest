@@ -63,7 +63,7 @@ program tridi_wktn_block
 	! for testing on 1 processor
 	if (numproc .eq. 1) then
 		do ii=1,n
-			call solve_tridiag(a(ii,:),b(ii,:),c(ii,:),d(ii,:),x(n,:),n)
+			call solve_tridiag(a(ii,:),b(ii,:),c(ii,:),d(ii,:),x(ii,:),n)
 		enddo
 	else
 		call tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,startindex,m,n/m)
@@ -118,7 +118,7 @@ subroutine tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,starti
 			print*, "root calc from ",s," to ",e
 			vp(s:e,1) = d(s:e,startindex)
 			do ij=2,indexspan
-				vp(s:e,ij) = d(s:e,startindex+ij-1) - a(s:e,startindex+ij-1)*vp(s:e,ii-1)/bp(s:e,startindex+ij-2)
+				vp(s:e,ij) = d(s:e,startindex+ij-1) - a(s:e,startindex+ij-1)*vp(s:e,ij-1)/bp(s:e,startindex+ij-2)
 			enddo
 			print*, "root isend block ",ii," to proc 1"
 			call MPI_Isend(vp(s:e,indexspan), m, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, sendreq(ii), ierr)
@@ -136,7 +136,7 @@ subroutine tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,starti
 		print*, myid, "doing first block of guessing"
 		vp(1:m,1) = d(1:m,startindex)
 		do ij=2,indexspan
-			vp(1:m,ij) = d(1:m,startindex+ij-1) - a(1:m,startindex+ij-1)*vp(1:m,ii-1)/bp(1:m,startindex+ij-2)
+			vp(1:m,ij) = d(1:m,startindex+ij-1) - a(1:m,startindex+ij-1)*vp(1:m,ij-1)/bp(1:m,startindex+ij-2)
 		enddo
 		crow = 1
 		checkrecv = 1
@@ -170,7 +170,7 @@ subroutine tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,starti
 					e = e+m
 					vp(s:e,1) = d(s:e,startindex)
 					do ij=2,indexspan
-						vp(s:e,ij) = d(s:e,startindex+ij-1) - a(s:e,startindex+ij-1)*vp(s:e,ii-1)/bp(s:e,startindex+ij-2)
+						vp(s:e,ij) = d(s:e,startindex+ij-1) - a(s:e,startindex+ij-1)*vp(s:e,ij-1)/bp(s:e,startindex+ij-2)
 					enddo
 				endif
 			else
@@ -268,4 +268,5 @@ backsub:do i = n-1, 1, -1
     x(i) = (vp(i) - c(i)*x(i+1))/bp(i)
     end do backsub
 
+	x = vp
 end subroutine solve_tridiag
