@@ -9,7 +9,7 @@ program tridi_wktn_block
 	real*8, dimension(:,:), allocatable :: a, b, c, d, x, bp, acorr, acorr2
 	integer indexspan, startindex, ii, ij, m
 	parameter (n=8)
-	parameter (m=4) ! message length
+	parameter (m=8) ! message length
 
 	real*8 t0, t1, t2, avgtime
 
@@ -108,6 +108,9 @@ subroutine tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,starti
 	real(8), dimension(n) :: recvbuff
 	real(8) :: r, corr, sendcorr
 	parameter (z=1) ! number of rows to calc while waiting
+
+	sendreq = 0
+	recvreq = 0
 
 ! Tridi pass 1
 	if (myid .eq. 0) then
@@ -213,32 +216,129 @@ subroutine tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,starti
 		endif
 	endif
 
-	x = vp
+	! reset recv req array
+	recvreq = 0
+	! wait for all sends to complete?
+	! not necessary if clever
+	do ij=1,numblocks ! mpi_waitall looks annoying
+		call MPI_Wait(sendreq(ij), stat, ierr)
+	enddo
+	sendreq = 0
 
 ! Start Second Phase
-	! Guess Phase
-!	x(indexspan) = vp(indexspan)/bp(indexspan+startindex-1)
-!	do ii=indexspan-1,1,-1
-!		x(ii) = vp(ii)/bp(startindex+ii-1) - (c(startindex+ii-1)/bp(startindex+ii-1))*x(ii+1)
-!	enddo
-	! Propagation Phase
-!	if (myid .ne. numproc-1) then
- !       call MPI_Recv(corr, 1, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, stat, ierr)
-!		x(1) = x(1) + acorr2(1)*corr
-!	endif
-!	sendcorr = x(1) ! could have sworn this was different. whatevs.
-!	if (myid .ne. 0) then
-!	    call MPI_Isend(sendcorr, 1, MPI_REAL8, myid-1, 0, MPI_COMM_WORLD, req, ierr)
-!	endif
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+	if (myid .eq. numproc-1) then
+		! all root needs to do is calc and send off
+		do ii=1,numblocks
+			s=1+(ii-1)*m
+			e=ii*m
+			print*, "PHASE2 root calc from ",s," to ",e
+			x(s:e,indexspan) = vp(s:e,indexspan)/bp(s:e,indexspan+startindex-1)
+			do ij=indexspan-1,1,-1
+				x(s:e,ij) = vp(s:e,ij)/bp(s:e,startindex+ij-1) - (c(s:e,startindex+ij-1)/bp(s:e,startindex+ij-1))*x(s:e,ij+1)
+			enddo
+			print*, "PHASE2 root isend block ",ii," to proc 1"
+			call MPI_Isend(x(s:e,1), m, MPI_REAL8, myid-1, 0, MPI_COMM_WORLD, sendreq(ii), ierr)
+		enddo
+	else
+		! post a bunch of recvs for checking later
+		do ii=1,numblocks
+			s = 1+(ii-1)*m
+			e = ii*m
+			print*, myid, "PHASE2 posting irecv of block ",ii," for later"
+			call MPI_Irecv(recvbuff(s:e), m, MPI_REAL8, myid+1, 0, MPI_COMM_WORLD, recvreq(ii), ierr)
+		enddo
 
-	! Correction Phase
-!	do ii=2,indexspan
-!		x(ii) = x(ii) + acorr2(ii)*corr
-!	enddo
-!	if (myid .ne. 0) then
-!		call MPI_Wait(req, stat, ierr)
-!	endif
+		! cant do anything without the first block
+		print*, myid, "PHASE 2doing first block of guessing"
+		x(1:m,indexspan) = vp(1:m,indexspan)/bp(1:m,indexspan+startindex-1)
+		do ij=indexspan-1,1,-1
+			x(1:m,ij) = vp(1:m,ij)/bp(1:m,startindex+ij-1) - (c(1:m,startindex+ij-1)/bp(1:m,startindex+ij-1))*x(s:e,ij+1)
+		enddo
+		crow = 1
+		checkrecv = 1
+		! all other procs are waiting on recvs, so work on things
+		! assume blocks will come in order
+		done = 0
+		do while (done .eq. 0)
+			
+			! check for recv
+			call MPI_Test(recvreq(checkrecv), flag, stat, ierr)
+			! if recv'd, look for next one
+			if (flag .eq. 1) then
+				print*, myid, "PHASE2 recvd block ", checkrecv
+				! quickly correct final row and send it off
+				s = 1+(checkrecv-1)*m
+				e = checkrecv*m
+				x(s:e,1) = x(s:e,1) + acorr2(s:e,1)*recvbuff(s:e)
+				if (myid .ne. 0) then
+					print*, myid, "PHASE2 propagating to next proc"
+					call MPI_Isend(x(s:e,1), m, MPI_REAL8, myid-1, 0, MPI_COMM_WORLD, sendreq(checkrecv), ierr)
+				endif
+				checkrecv = checkrecv + 1
+				! if recvd all, exit while loop
+				if (checkrecv .gt. numblocks) then
+					print*, myid, "PHASE2 all blocks recvd"
+					done = 1
+				else
+					! still have more blocks to come
+					! make sure guess is prepped
+					s = e+1 ! next block
+					e = e+m
+					x(s:e,indexspan) = vp(s:e,indexspan)/bp(s:e,indexspan+startindex-1)
+					do ij=indexspan-1,1,-1
+						x(s:e,ij) = vp(s:e,ij)/bp(s:e,startindex+ij-1) - (c(s:e,startindex+ij-1)/bp(s:e,startindex+ij-1))*x(s:e,ij+1)
+					enddo
+				endif
+			else
 
+			! correct a few rows
+			if (crow .le. n) then
+				span = z
+!				print*,myid,"waste time?",span,crow,n,checkrecv
+				if (crow+span-1 .gt. n) then
+					span = n-crow+1
+				endif
+				! dont correct if havent recvd a block yet
+				if (crow+span-1 .gt. m*(checkrecv-1)) then
+					span = m*(checkrecv-1)-crow+1
+!					print*,myid,"trunc2 to",span
+				endif
+				! correct from row (crow : crow+span-1)
+				if (span .gt. 0) then
+					s = crow
+					e = crow+span-1
+					print*, myid, "PHASE2 wasting time correcting from ",s," to ",e
+					do ij=2,indexspan
+						x(s:e,ij) = x(s:e,ij) + acorr2(s:e,ij)*recvbuff(s:e)
+					enddo
+					crow = crow + span
+				endif
+			endif
+
+			endif
+
+		end do
+		! correct remaining things
+		if (crow .le. n) then
+			s = crow
+			e = n
+			print*, myid, "PHASE2 computing rest of corrections from ",s," to ",e
+			do ij=2,indexspan
+				x(s:e,ij) = x(s:e,ij) + acorr2(s:e,ij)*recvbuff(s:e)
+			enddo
+		endif
+	endif
+
+	! reset recv req array
+	recvreq = 0
+	! wait for all sends to complete?
+	! not necessary if clever
+	do ij=1,numblocks ! mpi_waitall looks annoying
+		call MPI_Wait(sendreq(ij), stat, ierr)
+	enddo
+
+	! DOOONE
 end subroutine tridi_block
 
 ! for reference
@@ -268,5 +368,4 @@ backsub:do i = n-1, 1, -1
     x(i) = (vp(i) - c(i)*x(i+1))/bp(i)
     end do backsub
 
-	x = vp
 end subroutine solve_tridiag
