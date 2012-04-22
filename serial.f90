@@ -25,13 +25,15 @@ program serial
 	c = -1d0
 
 	! start time-stepping
-	do step=1,100000
+	do step=1,1000
 		! start in one direction
 		do i=1,n
 			! load up d
 			do k=1,n
 				d(k) = u(i+1,k) + 2d0*(dx*dx/dt-1d0)*u(i,k) + u(i-1,k)
 			enddo
+			d(1) = d(1) + u(i,1)
+			d(n) = d(n) + u(i,n)
 			! call tridi
 			call solve_tridiag(a,b,c,d,x,n)
 			! load result into other matrix
@@ -41,8 +43,10 @@ program serial
 		! now do other direction
 		do j=1,n
 			do k=1,n
-				d(k) = up(k,j+1) + 2d0*(dx*dx/dt-1d0)*up(k,j) + u(k,j-1)
+				d(k) = up(k,j+1) + 2d0*(dx*dx/dt-1d0)*up(k,j) + up(k,j-1)
 			enddo
+			d(1) = d(1) + up(1,j)
+			d(n) = d(n) + up(n,j)
 			call solve_tridiag(a,b,c,d,x,n)
 			! back to original matrix
 			u(1:n,j) = x
@@ -52,7 +56,7 @@ program serial
 
 	! output to screen
 	do i=0,n+1
-		write(*,'(10f5.1)'),up(i,0:n+1)
+		write(*,'(10f5.1)'),up(0:n+1,i)
 	enddo
 
 end program
