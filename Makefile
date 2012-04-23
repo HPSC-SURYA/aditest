@@ -3,6 +3,9 @@
 serial : serial.f90
 	gfortran -o serial serial.f90
 
+compare	: compare.f90
+	gfortran -o compare compare.f90
+
 transpose : transpose.f90
 	mpif90 -o transpose transpose.f90
 
