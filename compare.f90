@@ -29,7 +29,7 @@ program compare
    ! Now, perturb the actual array by a little bit, write it out, and
    ! compare it against the expected array.  The following call to
    ! compare_arrays_in_files should should write an error message to the screen.
-   actual_array(4,4) = actual_array(4,4) + 0.1;
+   actual_array(4,4) = actual_array(4,4) + 0.5;
    call write_array_to_file(actual_array, rows, columns, 'actual_sample')	
    call compare_arrays_in_files('expected_sample', 'actual_sample', 0.01d0) 
 
@@ -89,7 +89,7 @@ subroutine compare_arrays_in_files(expected_filename, actual_filename, tolerance
     arrays_differ = 0
     do i=1,expected_rows
       do j=1,expected_columns
-        if (abs(expected_array(i,j) - actual_array(i,j)) > abs(tolerance)) then
+        if (abs((expected_array(i,j) - actual_array(i,j))/expected_array(i,j)) > abs(tolerance)) then
           print *, 'ERROR:  Arrays differ by more than the tolerance at array location', i, ',', j
           print *, 'Expected value: ', expected_array(i,j), ' Actual value: ', actual_array(i,j)
           arrays_differ = 1
