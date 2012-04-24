@@ -6,7 +6,7 @@ program trans
 	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE), dt_slab, req
 	integer n, i, j, k, step, startindex, indexspan, stage, slabsize
 	integer id1, id2
-	parameter (n=8)
+	parameter (n=64)
 
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
@@ -102,6 +102,7 @@ program trans
 	! output to file for legit comparing
 	if (myid .eq. 0) then
 		open(25,file='out_trans')
+		write(25,*), n, n
 		do i=2,indexspan+1
 			write(25,*),slab1(2:n+1,i)
 		enddo

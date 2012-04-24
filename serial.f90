@@ -3,7 +3,7 @@ program serial
 	implicit none
 
 	integer n, i, j, k, step
-	parameter (n=8)
+	parameter (n=64)
 
 	real*8 u(0:n+1,0:n+1), up(0:n+1,0:n+1)
 	real*8 a(n), b(n), c(n), d(n), x(n)
@@ -56,6 +56,7 @@ program serial
 
 	! output to screen
 	open(25,file='out_serial')
+	write(25,*), n, n
 	do i=1,n
 		write(25,*),up(1:n,i)
 	enddo
