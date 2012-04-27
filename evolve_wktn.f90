@@ -13,7 +13,7 @@ program evolve_wktn
 	real*8 dx, dt, dt2, t0, t1, t2, avgtime
 	integer step, n, indexspan, startindex, ii, ij, ik, ms, slabsize, asdf
 	parameter (n=8)
-	parameter (ms=2) ! message length
+	parameter (ms=4) ! message length
 
 	! MPI goodness
 	call MPI_Init(ierr)
@@ -84,41 +84,38 @@ program evolve_wktn
 	! start time-stepping
 	do step=1,1000
 		! start in one direction
+
+		! wakatani call
+		do ij=1,n
+			do ik=2,indexspan+1
+				d(ij,startindex+ik-2) = slab1(ij+2,ik) + 2d0*(dx*dx/dt-1d0)*slab1(ij+1,ik) + slab1(ij,ik)
+			enddo
+			d(ij,startindex) = d(ij,startindex) + slab1(ij+1,1)
+			d(ij,startindex+indexspan-1) = d(ij,startindex+indexspan-1) + slab1(ij+1,indexspan+2)
+			! problem probably has to do with d() and whether or not it gets ghost points in it
+			! also where they go. does the mpi part use d() outside of a slab?
+		enddo
+		call tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,startindex,ms,asdf)
+		slab2(2:n+1,2:indexspan+1) = x
+
+		call ghosts(myid, numproc, slab2, n, indexspan)
+
 		! this is cache-preferred direction
 		do ii=2,indexspan+1
 			!i2 = i+startindex-1
 			! load up d
 			do ik=2,n+1
-				d(ik-1,ii) = slab1(ik,ii+1) + 2d0*(dx*dx/dt-1d0)*slab1(ik,ii) + slab1(ik,ii-1)
+				d(ik-1,ii) = slab2(ik,ii+1) + 2d0*(dx*dx/dt-1d0)*slab2(ik,ii) + slab2(ik,ii-1)
 			enddo
 			! deal with boundary conditions
-			d(1,ii) = d(1,ii) + slab1(1,ii)
-			d(n,ii) = d(n,ii) + slab1(n+2,ii)
+			d(1,ii) = d(1,ii) + slab2(1,ii)
+			d(n,ii) = d(n,ii) + slab2(n+2,ii)
 			! call tridi
 			call solve_tridiag(a(:,ii),b(:,ii),c(:,ii),d(:,ii),x2,n)
 			! load result into other matrix
-			slab2(2:n+1,ii) = x2
+			slab1(2:n+1,ii) = x2
 		enddo
 	
-		! communicate ghost points?
-		call ghosts(myid, numproc, slab2, n, indexspan)
-		! now do other direction
-		! set up d(,)
-		do ij=1,n
-			do ik=2,indexspan+1
-				d(ij,startindex+ik-2) = slab2(ij+2,ik) + 2d0*(dx*dx/dt-1d0)*slab2(ij+1,ik) + slab2(ij,ik)
-			enddo
-			if (myid .eq. 0) then
-				d(ij,startindex) = d(ij,startindex) + slab2(ij+1,1)
-			endif
-			if (myid .eq. numproc-1) then
-				d(ij,startindex+indexspan-1) = d(ij,startindex+indexspan-1) + slab2(ij+1,indexspan+2)
-			endif
-		enddo
-		call tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,startindex,ms,asdf)
-		slab1(2:n+1,2:indexspan+1) = x
-
-		call ghosts(myid, numproc, slab1, n, indexspan)
 	enddo
 	t1 = MPI_WTIME()
 	t2 = t1-t0
@@ -179,7 +176,7 @@ subroutine ghosts(myid, numproc, slab, n, indexspan)
 	integer stat(MPI_STATUS_SIZE)
 	real*8 slab(n+2,indexspan+2)
 	real*8 sendbuff(n), recvbuff(n)
-	
+
 	if (myid .ne. 0) then
 		sendbuff = slab(2:n+1,2)
 		call MPI_Isend(sendbuff, n, MPI_REAL8, myid-1, 7, MPI_COMM_WORLD, req, ierr)
@@ -188,7 +185,9 @@ subroutine ghosts(myid, numproc, slab, n, indexspan)
 		call MPI_Recv(recvbuff, n, MPI_REAL8, myid+1, 7, MPI_COMM_WORLD, stat, ierr)
 		slab(2:n+1,indexspan+2) = recvbuff
 	endif
-!	call MPI_Wait(req, stat, ierr)
+	if (myid .ne. 0) then
+		call MPI_Wait(req, stat, ierr)
+	endif
 	if (myid .ne. numproc-1) then
 		sendbuff = slab(2:n+1,indexspan+1)
 		call MPI_Isend(sendbuff, n, MPI_REAL8, myid+1, 7, MPI_COMM_WORLD, req, ierr)
@@ -197,7 +196,9 @@ subroutine ghosts(myid, numproc, slab, n, indexspan)
 		call MPI_Recv(recvbuff, n, MPI_REAL8, myid-1, 7, MPI_COMM_WORLD, stat, ierr)
 		slab(2:n+1,1) = recvbuff
 	endif
-!	call MPI_Wait(req, stat, ierr)
+	if (myid .ne. numproc-1) then
+		call MPI_Wait(req, stat, ierr)
+	endif
 end subroutine ghosts
 
 
@@ -363,7 +364,7 @@ subroutine tridi_block(a,b,c,d,x,n,myid,numproc,bp,acorr,acorr2,indexspan,starti
 !		print*, myid, "PHASE2 doing first block of guessing"
 		x(1:m,indexspan) = vp(1:m,indexspan)/bp(1:m,indexspan+startindex-1)
 		do ij=indexspan-1,1,-1
-			x(1:m,ij) = vp(1:m,ij)/bp(1:m,startindex+ij-1) - (c(1:m,startindex+ij-1)/bp(1:m,startindex+ij-1))*x(s:e,ij+1)
+			x(1:m,ij) = vp(1:m,ij)/bp(1:m,startindex+ij-1) - (c(1:m,startindex+ij-1)/bp(1:m,startindex+ij-1))*x(1:m,ij+1)
 		enddo
 		crow = 1
 		checkrecv = 1
