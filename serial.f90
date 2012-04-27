@@ -1,13 +1,15 @@
 
 program serial
 	implicit none
+	include "mpif.h"
 
 	integer n, i, j, k, step
-	parameter (n=64)
+	parameter (n=8)
 
-	real*8 u(0:n+1,0:n+1), up(0:n+1,0:n+1)
+	real*8 u(n+2,n+2), up(n+2,n+2)
 	real*8 a(n), b(n), c(n), d(n), x(n)
 	real*8 dx, dt, dt2
+	real*8 t0, t1, t2
 
 	! dx might actually be 1/(n+1)
 	dx = 1d0/n
@@ -15,9 +17,9 @@ program serial
 
 	! initialize things to 0
 	u = 0.0
-	u(0,:) = 1d0
+	u(1,:) = 1d0
 	up = 0.0 ! u-prime
-	up(0,:) = 1d0
+	up(1,:) = 1d0
 
 	! these never change, precompute
 	a = -1d0
@@ -25,40 +27,44 @@ program serial
 	c = -1d0
 
 	! start time-stepping
+	t0 = MPI_Wtime()
 	do step=1,1000
 		! start in one direction
 		do i=1,n
 			! load up d
 			do k=1,n
-				d(k) = u(i+1,k) + 2d0*(dx*dx/dt-1d0)*u(i,k) + u(i-1,k)
+				d(k) = u(i+2,k+1) + 2d0*(dx*dx/dt-1d0)*u(i+1,k+1) + u(i,k+1)
 			enddo
-			d(1) = d(1) + u(i,0)
-			d(n) = d(n) + u(i,n+1)
+			d(1) = d(1) + u(i+1,1)
+			d(n) = d(n) + u(i+1,n+2)
 			! call tridi
 			call solve_tridiag(a,b,c,d,x,n)
 			! load result into other matrix
-			up(i,1:n) = x
+			up(i+1,2:n+1) = x
 		enddo
 
 		! now do other direction
 		do j=1,n
 			do k=1,n
-				d(k) = up(k,j+1) + 2d0*(dx*dx/dt-1d0)*up(k,j) + up(k,j-1)
+				d(k) = up(k+1,j+2) + 2d0*(dx*dx/dt-1d0)*up(k+1,j+1) + up(k+1,j)
 			enddo
-			d(1) = d(1) + up(0,j)
-			d(n) = d(n) + up(n+1,j)
+			d(1) = d(1) + up(1,j+1)
+			d(n) = d(n) + up(n+2,j+1)
 			call solve_tridiag(a,b,c,d,x,n)
 			! back to original matrix
-			u(1:n,j) = x
+			u(2:n+1,j+1) = x
 		enddo
-
 	enddo
+	t1 = MPI_Wtime()
+
+	t2 = t1-t0
+	print*, t2
 
 	! output to screen
 	open(25,file='out_serial')
 	write(25,*), n, n
-	do i=1,n
-		write(25,*),up(1:n,i)
+	do i=2,n+1
+		write(25,*),u(2:n+1,i)
 	enddo
 	close(25)
 
