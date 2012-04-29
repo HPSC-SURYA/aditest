@@ -11,9 +11,17 @@ program evolve_wktn
 	real*8, dimension(:,:), allocatable :: slab1, slab2
 	real*8, dimension(:), allocatable :: x2, ghost1, ghost2
 	real*8 dx, dt, dt2, t0, t1, t2, avgtime
-	integer step, n, indexspan, startindex, ii, ij, ik, ms, slabsize, asdf
-	parameter (n=8)
-	parameter (ms=4) ! message length
+	integer step, n, indexspan, startindex, ii, ij, ik, ms, slabsize, asdf, maxstep
+!	parameter (n=1024)
+!	parameter (ms=16) ! message length
+	character *100 buffer
+	
+	call getarg(1,buffer)
+	read(buffer,*) n
+	call getarg(2,buffer)
+	read(buffer,*) maxstep
+	call getarg(3,buffer)
+	read(buffer,*) ms
 
 	! MPI goodness
 	call MPI_Init(ierr)
@@ -82,7 +90,7 @@ program evolve_wktn
 	call MPI_Barrier(MPI_COMM_WORLD, ierr)
 	t0 = MPI_WTIME()
 	! start time-stepping
-	do step=1,1000
+	do step=1,maxstep
 		! start in one direction
 
 		! wakatani call
