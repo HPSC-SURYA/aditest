@@ -3,13 +3,29 @@ program serial
 	implicit none
 	include "mpif.h"
 
-	integer n, i, j, k, step
-	parameter (n=8)
+	integer n, i, j, k, step, maxstep
+!	parameter (n=1024)
 
-	real*8 u(n+2,n+2), up(n+2,n+2)
-	real*8 a(n), b(n), c(n), d(n), x(n)
+	real*8, dimension(:,:), allocatable :: u, up
+	real*8, dimension(:), allocatable :: a,b,c,d,x
+!	real*8 u(n+2,n+2), up(n+2,n+2)
+!	real*8 a(n), b(n), c(n), d(n), x(n)
 	real*8 dx, dt, dt2
 	real*8 t0, t1, t2
+	character *100 buffer
+
+	call getarg(1,buffer)
+	read(buffer,*) n
+	call getarg(2,buffer)
+	read(buffer,*) maxstep
+
+	allocate(u(n+2,n+2))
+	allocate(up(n+2,n+2))
+	allocate(a(n))
+	allocate(b(n))
+	allocate(c(n))
+	allocate(d(n))
+	allocate(x(n))
 
 	! dx might actually be 1/(n+1)
 	dx = 1d0/n
@@ -28,7 +44,7 @@ program serial
 
 	! start time-stepping
 	t0 = MPI_Wtime()
-	do step=1,1000
+	do step=1,maxstep
 		! start in one direction
 		do i=1,n
 			! load up d

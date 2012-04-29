@@ -4,19 +4,25 @@ program trans
 	include "mpif.h"
 
 	integer myid, numproc, ierr, stat(MPI_STATUS_SIZE), dt_slab, req
-	integer n, i, j, k, step, startindex, indexspan, stage, slabsize
+	integer n, i, j, k, step, startindex, indexspan, stage, slabsize, maxstep
 	integer id1, id2
-	parameter (n=64)
+!	parameter (n=8)
 
 	! probably could use allocatable arrays to reduce memory duplication
 	! oh well
 	real*8, dimension(:,:), allocatable :: slab1, slab2, slabt, slabt2
-	real*8 a(n), b(n), c(n), d(n), x(n)
+	real*8, dimension(:), allocatable :: a,b,c,d,x
+!	real*8 a(n), b(n), c(n), d(n), x(n)
 	real*8 dx, dt, dt2
 
 	! timing stuff
 	real*8 t0, t1, t2, avgtime
+	character *100 buffer
 
+	call getarg(1,buffer)
+	read(buffer,*) n
+	call getarg(2,buffer)
+	read(buffer,*) maxstep
 
 	! MPI goodness
 	call MPI_Init(ierr)
@@ -31,6 +37,11 @@ program trans
 	allocate(slab2(n+2,indexspan+2))
 	allocate(slabt(indexspan+2,n+2))
 	allocate(slabt2(indexspan+2,n+2))
+	allocate(a(n))
+	allocate(b(n))
+	allocate(c(n))
+	allocate(d(n))
+	allocate(x(n))
 
 	call MPI_TYPE_CONTIGUOUS(slabsize, MPI_DOUBLE_PRECISION, dt_slab, ierr)
 	call MPI_TYPE_COMMIT(dt_slab, ierr)
@@ -56,7 +67,7 @@ program trans
 	call MPI_Barrier(MPI_COMM_WORLD, ierr)
 	t0 = MPI_WTIME()
 	! start time-stepping
-	do step=1,1000
+	do step=1,maxstep
 		! start in one direction
 		do i=2,indexspan+1
 			!i2 = i+startindex-1
